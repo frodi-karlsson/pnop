@@ -100,3 +100,26 @@ func TestRunInheritsStdioSoPromptsWork(t *testing.T) {
 		t.Errorf("stderr = %q, want the child's stderr to reach the caller", got)
 	}
 }
+
+func TestOutputCapturesStdout(t *testing.T) {
+	out, code, err := runner.Exec{}.Output(t.Context(), "sh", "-c", "echo 11.22.0")
+	if err != nil {
+		t.Fatalf("Output: %v", err)
+	}
+	if code != 0 {
+		t.Errorf("code = %d, want 0", code)
+	}
+	if out != "11.22.0" {
+		t.Errorf("out = %q, want 11.22.0 (trimmed)", out)
+	}
+}
+
+func TestOutputReportsExitCode(t *testing.T) {
+	_, code, err := runner.Exec{}.Output(t.Context(), "sh", "-c", "exit 3")
+	if err != nil {
+		t.Fatalf("Output: %v", err)
+	}
+	if code != 3 {
+		t.Errorf("code = %d, want 3", code)
+	}
+}

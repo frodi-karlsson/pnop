@@ -2,11 +2,13 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"syscall"
 )
 
@@ -15,6 +17,9 @@ import (
 // with a nil error.
 type Runner interface {
 	Run(ctx context.Context, name string, args ...string) (int, error)
+	// Output runs the command and captures its stdout, for the rare case
+	// where pnop needs to read a value rather than show the user output.
+	Output(ctx context.Context, name string, args ...string) (string, int, error)
 }
 
 // Exec is the real Runner. Its streams are inherited by the child process, so
@@ -41,6 +46,23 @@ func (e Exec) Run(ctx context.Context, name string, args ...string) (int, error)
 		return 0, fmt.Errorf("run %s: %w", name, err)
 	}
 	return 0, nil
+}
+
+// Output runs name with args and returns its trimmed stdout.
+func (e Exec) Output(ctx context.Context, name string, args ...string) (string, int, error) {
+	var stdout bytes.Buffer
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdout = &stdout
+	cmd.Stderr = e.Stderr
+
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return strings.TrimSpace(stdout.String()), waitStatusCode(exitErr), nil
+		}
+		return "", 0, fmt.Errorf("run %s: %w", name, err)
+	}
+	return strings.TrimSpace(stdout.String()), 0, nil
 }
 
 // waitStatusCode converts a process result to a shell-style exit code.
