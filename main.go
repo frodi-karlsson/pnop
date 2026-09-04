@@ -78,7 +78,7 @@ func installDeps() (install.Deps, error) {
 	}
 
 	return install.Deps{
-		Config: cfg.WithDefaults(),
+		Entry: cfg.WithDefaults(),
 		Secret: secret.OP{Stdin: os.Stdin, Stderr: os.Stderr},
 		Npmrc:  npmrc.FileStore{},
 		Runner: runner.Exec{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr},

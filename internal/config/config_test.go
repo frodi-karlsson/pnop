@@ -11,7 +11,7 @@ import (
 
 func TestSaveLoadRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "config.toml")
-	want := config.Config{
+	want := config.Entry{
 		File:     "/Users/someone/.npmrc",
 		Vault:    "MyVault",
 		Item:     "MyItem",
@@ -33,7 +33,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 
 func TestSaveIsOwnerOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	cfg := config.Config{File: "/tmp/.npmrc", Vault: "MyVault", Item: "tok", Field: "tokenfield"}
+	cfg := config.Entry{File: "/tmp/.npmrc", Vault: "MyVault", Item: "tok", Field: "tokenfield"}
 
 	if err := config.Save(path, cfg); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -80,10 +80,18 @@ func TestWithDefaultsNormalisesRegistryURL(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := config.Config{File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F", Registry: tt.in}.WithDefaults()
+		got := config.Entry{File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F", Registry: tt.in}.WithDefaults()
 		if got.Registry != tt.want {
 			t.Errorf("Registry(%q) = %q, want %q", tt.in, got.Registry, tt.want)
 		}
+	}
+}
+
+func TestWithDefaultsFillsFile(t *testing.T) {
+	got := config.Entry{Vault: "V", Item: "I", Field: "F"}.WithDefaults()
+
+	if got.File != "~/.npmrc" {
+		t.Errorf("File = %q, want ~/.npmrc", got.File)
 	}
 }
 
@@ -93,7 +101,7 @@ func TestSaveTightensPermissionsOnAnExistingFile(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	if err := config.Save(path, config.Config{File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F"}); err != nil {
+	if err := config.Save(path, config.Entry{File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F"}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -128,7 +136,7 @@ func TestLoadRejectsIncompleteConfig(t *testing.T) {
 func TestSaveRejectsIncompleteConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 
-	if err := config.Save(path, config.Config{File: "/tmp/.npmrc"}); err == nil {
+	if err := config.Save(path, config.Entry{File: "/tmp/.npmrc"}); err == nil {
 		t.Error("Save succeeded, want validation error")
 	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
@@ -137,7 +145,7 @@ func TestSaveRejectsIncompleteConfig(t *testing.T) {
 }
 
 func TestWithDefaults(t *testing.T) {
-	got := config.Config{File: "/tmp/.npmrc", Vault: "MyVault", Item: "tok", Field: "tokenfield"}.WithDefaults()
+	got := config.Entry{File: "/tmp/.npmrc", Vault: "MyVault", Item: "tok", Field: "tokenfield"}.WithDefaults()
 
 	if got.Registry != "registry.npmjs.org" {
 		t.Errorf("Registry = %q, want registry.npmjs.org", got.Registry)
@@ -147,7 +155,7 @@ func TestWithDefaults(t *testing.T) {
 // Vault, item and field describe the user's own 1Password layout, so pnop must
 // never guess them.
 func TestWithDefaultsNeverGuessesTheItemLayout(t *testing.T) {
-	got := config.Config{File: "/tmp/.npmrc"}.WithDefaults()
+	got := config.Entry{File: "/tmp/.npmrc"}.WithDefaults()
 
 	if got.Vault != "" || got.Item != "" || got.Field != "" {
 		t.Errorf("WithDefaults invented vault=%q item=%q field=%q, want all empty",
@@ -159,7 +167,7 @@ func TestWithDefaultsNeverGuessesTheItemLayout(t *testing.T) {
 }
 
 func TestWithDefaultsKeepsExplicitValues(t *testing.T) {
-	got := config.Config{
+	got := config.Entry{
 		File: "/tmp/.npmrc", Vault: "MyVault", Item: "tok",
 		Field: "otherfield", Registry: "npm.pkg.github.com",
 	}.WithDefaults()

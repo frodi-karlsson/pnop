@@ -18,14 +18,14 @@ type Deps struct {
 	Secret     secret.Fetcher
 	Npmrc      npmrc.Store
 	// SaveConfig persists the validated config.
-	SaveConfig func(path string, cfg config.Config) error
+	SaveConfig func(path string, cfg config.Entry) error
 	// Log receives progress messages, never the token itself.
 	Log logger.Logger
 }
 
 // Command returns the `pnop setup` subcommand.
 func Command(load func() (Deps, error)) *cobra.Command {
-	cfg := config.Config{}
+	entry := config.Entry{}
 
 	cmd := &cobra.Command{
 		Use:   "setup",
@@ -39,22 +39,22 @@ func Command(load func() (Deps, error)) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return Run(cmd.Context(), deps, cfg)
+			return Run(cmd.Context(), deps, entry)
 		},
 	}
 
-	cmd.Flags().StringVar(&cfg.File, "file", "~/.npmrc", "npmrc file pnop keeps in sync")
-	cmd.Flags().StringVar(&cfg.Vault, "vault", "", "1Password vault holding the token (required)")
-	cmd.Flags().StringVar(&cfg.Item, "item", "", "1Password item holding the token (required)")
-	cmd.Flags().StringVar(&cfg.Field, "field", "", "field on the item holding the token (required)")
-	cmd.Flags().StringVar(&cfg.Registry, "registry", npmrc.DefaultRegistry, "registry whose _authToken is managed")
+	cmd.Flags().StringVar(&entry.File, "file", "", "npmrc file pnop keeps in sync")
+	cmd.Flags().StringVar(&entry.Vault, "vault", "", "1Password vault holding the token (required)")
+	cmd.Flags().StringVar(&entry.Item, "item", "", "1Password item holding the token (required)")
+	cmd.Flags().StringVar(&entry.Field, "field", "", "field on the item holding the token (required)")
+	cmd.Flags().StringVar(&entry.Registry, "registry", npmrc.DefaultRegistry, "registry whose _authToken is managed")
 
 	return cmd
 }
 
 // Run validates the config, saves it, then fetches and writes the token so
 // setup leaves a working npmrc behind rather than only a config file.
-func Run(ctx context.Context, d Deps, cfg config.Config) error {
+func Run(ctx context.Context, d Deps, cfg config.Entry) error {
 	cfg = cfg.WithDefaults()
 	if err := cfg.Validate(); err != nil {
 		return err

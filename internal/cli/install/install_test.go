@@ -71,7 +71,7 @@ func (f *fakeNpmrc) WriteToken(_, _, token string) error {
 
 func deps(r *fakeRunner, s *fakeSecret, n *fakeNpmrc, log logger.Logger) install.Deps {
 	return install.Deps{
-		Config: config.Config{
+		Entry: config.Entry{
 			File: "/tmp/.npmrc", Vault: "MyVault", Item: "MyItem", Field: "tokenfield",
 		}.WithDefaults(),
 		Secret: s,

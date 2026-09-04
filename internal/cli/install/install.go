@@ -19,7 +19,7 @@ const PackageManager = "pnpm"
 // Deps are the collaborators Run needs. They are injected so the decision
 // logic can be tested without a real pnpm, 1Password or filesystem.
 type Deps struct {
-	Config config.Config
+	Entry  config.Entry
 	Secret secret.Fetcher
 	Npmrc  npmrc.Store
 	Runner runner.Runner
@@ -77,7 +77,7 @@ func Run(ctx context.Context, d Deps, args []string) error {
 		return cli.Exit(code)
 	}
 
-	d.Log.Infof("token was stale, updated %s - retrying...", d.Config.File)
+	d.Log.Infof("token was stale, updated %s - retrying...", d.Entry.File)
 
 	retryCode, err := d.Runner.Run(ctx, PackageManager, append([]string{"install"}, args...)...)
 	if err != nil {
@@ -88,12 +88,12 @@ func Run(ctx context.Context, d Deps, args []string) error {
 
 // refreshToken reports whether the managed npmrc was actually changed.
 func refreshToken(ctx context.Context, d Deps) (bool, error) {
-	current, err := d.Npmrc.ReadToken(d.Config.File, d.Config.Registry)
+	current, err := d.Npmrc.ReadToken(d.Entry.File, d.Entry.Registry)
 	if err != nil {
 		return false, err
 	}
 
-	fresh, err := d.Secret.Fetch(ctx, d.Config.Vault, d.Config.Item, d.Config.Field)
+	fresh, err := d.Secret.Fetch(ctx, d.Entry.Vault, d.Entry.Item, d.Entry.Field)
 	if err != nil {
 		return false, err
 	}
@@ -101,7 +101,7 @@ func refreshToken(ctx context.Context, d Deps) (bool, error) {
 	if fresh == current {
 		return false, nil
 	}
-	if err := d.Npmrc.WriteToken(d.Config.File, d.Config.Registry, fresh); err != nil {
+	if err := d.Npmrc.WriteToken(d.Entry.File, d.Entry.Registry, fresh); err != nil {
 		return false, err
 	}
 	return true, nil

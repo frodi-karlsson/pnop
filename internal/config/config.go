@@ -14,8 +14,12 @@ import (
 	"github.com/frodi-karlsson/pnop/internal/npmrc"
 )
 
-// Config is the on-disk configuration written by `pnop setup`.
-type Config struct {
+// DefaultFile is the npmrc pnop manages when an entry does not name one.
+const DefaultFile = "~/.npmrc"
+
+// Entry is one named credential configuration: which npmrc to keep in sync,
+// and where its token lives in 1Password.
+type Entry struct {
 	// File is the npmrc pnop keeps in sync. pnpm reads ~/.npmrc.
 	File string `toml:"file"`
 	// Vault, Item and Field locate the token in 1Password.
@@ -43,8 +47,8 @@ func Path() (string, error) {
 
 // Load reads the config at path. A missing file yields ErrNotConfigured so the
 // caller can print setup instructions rather than a bare stat error.
-func Load(path string) (Config, error) {
-	var cfg Config
+func Load(path string) (Entry, error) {
+	var cfg Entry
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -70,7 +74,7 @@ func Load(path string) (Config, error) {
 }
 
 // Save writes cfg to path, creating parent directories as needed.
-func Save(path string, cfg Config) error {
+func Save(path string, cfg Entry) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -93,16 +97,16 @@ func Save(path string, cfg Config) error {
 	return nil
 }
 
-// Validate reports whether the config has everything needed to fetch a token.
-func (c Config) Validate() error {
+// Validate reports whether the entry has everything needed to fetch a token.
+func (e Entry) Validate() error {
 	switch {
-	case c.File == "":
+	case e.File == "":
 		return errors.New("file is required")
-	case c.Vault == "":
+	case e.Vault == "":
 		return errors.New("vault is required")
-	case c.Item == "":
+	case e.Item == "":
 		return errors.New("item is required")
-	case c.Field == "":
+	case e.Field == "":
 		return errors.New("field is required")
 	}
 	return nil
@@ -111,15 +115,18 @@ func (c Config) Validate() error {
 // WithDefaults fills in the optional fields that callers may leave blank.
 // Vault, Item and Field have no defaults: they describe the user's own
 // 1Password layout, which pnop makes no assumptions about.
-func (c Config) WithDefaults() Config {
-	if c.Registry == "" {
-		c.Registry = npmrc.DefaultRegistry
+func (e Entry) WithDefaults() Entry {
+	if e.File == "" {
+		e.File = DefaultFile
+	}
+	if e.Registry == "" {
+		e.Registry = npmrc.DefaultRegistry
 	}
 	// A registry pasted as a URL would otherwise build a malformed npmrc key
 	// such as "//https://registry.npmjs.org//:_authToken=".
-	c.Registry = strings.TrimSuffix(
-		strings.TrimPrefix(strings.TrimPrefix(c.Registry, "https://"), "http://"), "/")
-	return c
+	e.Registry = strings.TrimSuffix(
+		strings.TrimPrefix(strings.TrimPrefix(e.Registry, "https://"), "http://"), "/")
+	return e
 }
 
 // ExpandPath resolves a leading ~ and makes the result absolute, so a config

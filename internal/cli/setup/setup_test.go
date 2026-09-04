@@ -47,12 +47,12 @@ func (f *fakeNpmrc) WriteToken(path, registry, token string) error {
 
 type savedConfig struct {
 	path string
-	cfg  config.Config
+	cfg  config.Entry
 	err  error
 	n    int
 }
 
-func (s *savedConfig) save(path string, cfg config.Config) error {
+func (s *savedConfig) save(path string, cfg config.Entry) error {
 	if s.err != nil {
 		return s.err
 	}
@@ -78,7 +78,7 @@ func TestWritesTokenAndConfig(t *testing.T) {
 	saved := &savedConfig{}
 	d := deps(t, sec, n, saved)
 
-	err := setup.Run(t.Context(), d, config.Config{
+	err := setup.Run(t.Context(), d, config.Entry{
 		File: "/tmp/pnop-test/.npmrc", Vault: "MyVault", Item: "MyItem", Field: "tokenfield",
 	})
 	if err != nil {
@@ -103,7 +103,7 @@ func TestAppliesDefaults(t *testing.T) {
 	sec := &fakeSecret{token: "npm_tok"}
 	saved := &savedConfig{}
 
-	err := setup.Run(t.Context(), deps(t, sec, &fakeNpmrc{}, saved), config.Config{
+	err := setup.Run(t.Context(), deps(t, sec, &fakeNpmrc{}, saved), config.Entry{
 		File: "/tmp/.npmrc", Vault: "MyVault", Item: "tok", Field: "tokenfield",
 	})
 	if err != nil {
@@ -125,7 +125,7 @@ func TestExpandsTildeBeforeSaving(t *testing.T) {
 	}
 	saved := &savedConfig{}
 
-	err = setup.Run(t.Context(), deps(t, &fakeSecret{token: "tok"}, &fakeNpmrc{}, saved), config.Config{
+	err = setup.Run(t.Context(), deps(t, &fakeSecret{token: "tok"}, &fakeNpmrc{}, saved), config.Entry{
 		File: "~/.npmrc.job", Vault: "MyVault", Item: "tok", Field: "tokenfield",
 	})
 	if err != nil {
@@ -141,17 +141,16 @@ func TestExpandsTildeBeforeSaving(t *testing.T) {
 	}
 }
 
-// pnop makes no assumptions about the user's 1Password layout, so every
-// coordinate has to be supplied explicitly.
+// pnop makes no assumptions about the user's 1Password layout, so vault, item
+// and field must be supplied explicitly (unlike File, which has a default).
 func TestRequiresEveryItemCoordinate(t *testing.T) {
 	tests := []struct {
 		name string
-		cfg  config.Config
+		cfg  config.Entry
 	}{
-		{"no vault", config.Config{File: "/tmp/.npmrc", Item: "tok", Field: "tokenfield"}},
-		{"no item", config.Config{File: "/tmp/.npmrc", Vault: "MyVault", Field: "tokenfield"}},
-		{"no field", config.Config{File: "/tmp/.npmrc", Vault: "MyVault", Item: "tok"}},
-		{"no file", config.Config{Vault: "MyVault", Item: "tok", Field: "tokenfield"}},
+		{"no vault", config.Entry{File: "/tmp/.npmrc", Item: "tok", Field: "tokenfield"}},
+		{"no item", config.Entry{File: "/tmp/.npmrc", Vault: "MyVault", Field: "tokenfield"}},
+		{"no field", config.Entry{File: "/tmp/.npmrc", Vault: "MyVault", Item: "tok"}},
 	}
 
 	for _, tt := range tests {
@@ -174,7 +173,7 @@ func TestDoesNotSaveConfigWhenFetchFails(t *testing.T) {
 	saved := &savedConfig{}
 	n := &fakeNpmrc{}
 
-	err := setup.Run(t.Context(), deps(t, sec, n, saved), config.Config{
+	err := setup.Run(t.Context(), deps(t, sec, n, saved), config.Entry{
 		File: "/tmp/.npmrc", Vault: "MyVault", Item: "tok", Field: "tokenfield",
 	})
 
@@ -193,7 +192,7 @@ func TestDoesNotSaveConfigWhenNpmrcWriteFails(t *testing.T) {
 	saved := &savedConfig{}
 	n := &fakeNpmrc{writeErr: errors.New("permission denied")}
 
-	err := setup.Run(t.Context(), deps(t, &fakeSecret{token: "tok"}, n, saved), config.Config{
+	err := setup.Run(t.Context(), deps(t, &fakeSecret{token: "tok"}, n, saved), config.Entry{
 		File: "/tmp/.npmrc", Vault: "MyVault", Item: "tok", Field: "tokenfield",
 	})
 
