@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -113,6 +114,51 @@ func Save(path string, cfg Config) error {
 		return fmt.Errorf("chmod %s: %w", path, err)
 	}
 	return nil
+}
+
+// ErrNoActive is returned when the config defines entries but names none active.
+var ErrNoActive = errors.New("no active config - run: pnop setup -c <name>")
+
+// UnknownConfigError names a config that is referenced but not defined.
+type UnknownConfigError struct {
+	Name  string
+	Known []string
+}
+
+// Error implements error.
+func (e *UnknownConfigError) Error() string {
+	if len(e.Known) == 0 {
+		return fmt.Sprintf("no config named %q, and none are defined", e.Name)
+	}
+	return fmt.Sprintf("no config named %q - defined: %s", e.Name, strings.Join(e.Known, ", "))
+}
+
+// ActiveEntry returns the entry named by Active.
+func (c Config) ActiveEntry() (Entry, error) {
+	if c.Active == "" {
+		return Entry{}, ErrNoActive
+	}
+	return c.Entry(c.Active)
+}
+
+// Entry returns the named entry, or an UnknownConfigError listing the names
+// that do exist.
+func (c Config) Entry(name string) (Entry, error) {
+	entry, ok := c.Configs[name]
+	if !ok {
+		return Entry{}, &UnknownConfigError{Name: name, Known: c.Names()}
+	}
+	return entry, nil
+}
+
+// Names returns every defined config name, sorted for stable output.
+func (c Config) Names() []string {
+	names := make([]string, 0, len(c.Configs))
+	for name := range c.Configs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // Validate reports whether the entry has everything needed to fetch a token.

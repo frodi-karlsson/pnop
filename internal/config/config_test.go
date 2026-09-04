@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/frodi-karlsson/pnop/internal/config"
@@ -254,5 +255,51 @@ field = "F"
 
 	if want := filepath.Join(home, ".npmrc"); cfg.Configs["job"].File != want {
 		t.Errorf("File = %q, want %q", cfg.Configs["job"].File, want)
+	}
+}
+
+func TestActiveEntry(t *testing.T) {
+	cfg := config.Config{
+		Active: "job",
+		Configs: map[string]config.Entry{
+			"job":     {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F"},
+			"private": {File: "/tmp/.npmrc", Vault: "E", Item: "P", Field: "password"},
+		},
+	}
+
+	got, err := cfg.ActiveEntry()
+	if err != nil {
+		t.Fatalf("ActiveEntry: %v", err)
+	}
+	if got.Vault != "V" {
+		t.Errorf("Vault = %q, want V", got.Vault)
+	}
+}
+
+func TestActiveEntryWithNoActiveSet(t *testing.T) {
+	cfg := config.Config{
+		Configs: map[string]config.Entry{"job": {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F"}},
+	}
+
+	if _, err := cfg.ActiveEntry(); !errors.Is(err, config.ErrNoActive) {
+		t.Errorf("err = %v, want ErrNoActive", err)
+	}
+}
+
+// A typo in `active`, or a hand-deleted entry, must say which names do exist.
+func TestActiveEntryNamingAMissingConfig(t *testing.T) {
+	cfg := config.Config{
+		Active:  "jbo",
+		Configs: map[string]config.Entry{"job": {}, "private": {}},
+	}
+
+	_, err := cfg.ActiveEntry()
+	if err == nil {
+		t.Fatal("ActiveEntry succeeded, want an error")
+	}
+	for _, want := range []string{"jbo", "job", "private"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err %q does not mention %q", err, want)
+		}
 	}
 }
