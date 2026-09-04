@@ -1,4 +1,5 @@
 bin/
 dist/
+docs/
 pni
 .DS_Store
