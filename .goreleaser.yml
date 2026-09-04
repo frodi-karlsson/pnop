@@ -35,7 +35,9 @@ changelog:
       - '^test:'
 
 release:
-  draft: true
+  # Not a draft: the cask pushed to homebrew-tap points at this release's
+  # assets, which stay unreachable while the release is unpublished.
+  draft: false
   prerelease: auto
 
 homebrew_casks:
