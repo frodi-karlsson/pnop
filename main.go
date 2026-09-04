@@ -131,6 +131,6 @@ func exitCode(err error) int {
 	if errors.As(err, &exitErr) {
 		return exitErr.Code
 	}
-	fmt.Fprintf(os.Stderr, "pnop: %v\n", err)
+	fmt.Fprintf(os.Stderr, "[pnop] [error] %v\n", err)
 	return 1
 }
