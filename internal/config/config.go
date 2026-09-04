@@ -31,7 +31,17 @@ type Entry struct {
 }
 
 // ErrNotConfigured is returned by Load when `pnop setup` has never been run.
-var ErrNotConfigured = errors.New("pnop is not configured yet - run: pnop setup --file=~/.npmrc --vault=<vault> --item=<item> --field=<field>")
+var ErrNotConfigured = errors.New(
+	"pnop is not configured yet - run: pnop setup -c <name> --vault=<vault> --item=<item> --field=<field>")
+
+// Config is the whole on-disk document: a set of named entries plus a pointer
+// to the one in force.
+type Config struct {
+	// Active names the entry every non-setup command uses.
+	Active string `toml:"active"`
+	// Configs holds every entry the user has defined, keyed by name.
+	Configs map[string]Entry `toml:"configs"`
+}
 
 // Path returns the config file location, honouring XDG_CONFIG_HOME.
 func Path() (string, error) {
@@ -47,8 +57,12 @@ func Path() (string, error) {
 
 // Load reads the config at path. A missing file yields ErrNotConfigured so the
 // caller can print setup instructions rather than a bare stat error.
-func Load(path string) (Entry, error) {
-	var cfg Entry
+//
+// Entry file paths are expanded here as well as on save: a hand-edited or
+// dotfiles-synced config containing a literal "~" would otherwise be taken
+// literally and write a credential into a directory named "~".
+func Load(path string) (Config, error) {
+	var cfg Config
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -59,24 +73,28 @@ func Load(path string) (Entry, error) {
 	if err := toml.Unmarshal(b, &cfg); err != nil {
 		return cfg, fmt.Errorf("parse %s: %w", path, err)
 	}
-	if err := cfg.Validate(); err != nil {
-		return cfg, fmt.Errorf("%s: %w", path, err)
+
+	for name, entry := range cfg.Configs {
+		entry = entry.WithDefaults()
+		if err := entry.Validate(); err != nil {
+			return cfg, fmt.Errorf("%s: config %q: %w", path, name, err)
+		}
+		file, err := ExpandPath(entry.File)
+		if err != nil {
+			return cfg, fmt.Errorf("%s: config %q: %w", path, name, err)
+		}
+		entry.File = file
+		cfg.Configs[name] = entry
 	}
-	// Expand here as well as in setup: a config can arrive hand-edited or from
-	// a dotfiles repo, and an unexpanded "~" would otherwise be taken
-	// literally and write the token into a directory named "~".
-	file, err := ExpandPath(cfg.File)
-	if err != nil {
-		return cfg, fmt.Errorf("%s: %w", path, err)
-	}
-	cfg.File = file
 	return cfg, nil
 }
 
 // Save writes cfg to path, creating parent directories as needed.
-func Save(path string, cfg Entry) error {
-	if err := cfg.Validate(); err != nil {
-		return err
+func Save(path string, cfg Config) error {
+	for name, entry := range cfg.Configs {
+		if err := entry.WithDefaults().Validate(); err != nil {
+			return fmt.Errorf("config %q: %w", name, err)
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)

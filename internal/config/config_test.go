@@ -9,31 +9,12 @@ import (
 	"github.com/frodi-karlsson/pnop/internal/config"
 )
 
-func TestSaveLoadRoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nested", "config.toml")
-	want := config.Entry{
-		File:     "/Users/someone/.npmrc",
-		Vault:    "MyVault",
-		Item:     "MyItem",
-		Field:    "MyField",
-		Registry: "registry.npmjs.org",
-	}
-
-	if err := config.Save(path, want); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-	got, err := config.Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if got != want {
-		t.Errorf("config = %+v, want %+v", got, want)
-	}
-}
-
 func TestSaveIsOwnerOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	cfg := config.Entry{File: "/tmp/.npmrc", Vault: "MyVault", Item: "tok", Field: "tokenfield"}
+	cfg := config.Config{
+		Active:  "job",
+		Configs: map[string]config.Entry{"job": {File: "/tmp/.npmrc", Vault: "MyVault", Item: "tok", Field: "tokenfield"}},
+	}
 
 	if err := config.Save(path, cfg); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -45,30 +26,6 @@ func TestSaveIsOwnerOnly(t *testing.T) {
 	}
 	if perm := info.Mode().Perm(); perm != 0o600 {
 		t.Errorf("mode = %o, want 600", perm)
-	}
-}
-
-// A config can arrive hand-edited or from a dotfiles repo. An unexpanded "~"
-// would be taken literally and write the npm token into a directory named "~"
-// under the current working directory.
-func TestLoadExpandsTildeInFile(t *testing.T) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip("no home dir")
-	}
-	path := filepath.Join(t.TempDir(), "config.toml")
-	content := "file = \"~/.npmrc\"\nvault = \"V\"\nitem = \"I\"\nfield = \"F\"\n"
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-
-	cfg, err := config.Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-
-	if want := filepath.Join(home, ".npmrc"); cfg.File != want {
-		t.Errorf("File = %q, want %q", cfg.File, want)
 	}
 }
 
@@ -101,7 +58,11 @@ func TestSaveTightensPermissionsOnAnExistingFile(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	if err := config.Save(path, config.Entry{File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F"}); err != nil {
+	cfg := config.Config{
+		Active:  "job",
+		Configs: map[string]config.Entry{"job": {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F"}},
+	}
+	if err := config.Save(path, cfg); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -123,8 +84,9 @@ func TestLoadMissingFileIsNotConfigured(t *testing.T) {
 
 func TestLoadRejectsIncompleteConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	// Vault and item missing: a token could never be fetched from this.
-	if err := os.WriteFile(path, []byte("file = \"/tmp/.npmrc\"\n"), 0o600); err != nil {
+	// Vault, item and field missing: a token could never be fetched from this.
+	content := "active = \"job\"\n\n[configs.job]\nfile = \"/tmp/.npmrc\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
@@ -136,7 +98,11 @@ func TestLoadRejectsIncompleteConfig(t *testing.T) {
 func TestSaveRejectsIncompleteConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 
-	if err := config.Save(path, config.Entry{File: "/tmp/.npmrc"}); err == nil {
+	cfg := config.Config{
+		Active:  "job",
+		Configs: map[string]config.Entry{"job": {File: "/tmp/.npmrc"}},
+	}
+	if err := config.Save(path, cfg); err == nil {
 		t.Error("Save succeeded, want validation error")
 	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
@@ -225,5 +191,68 @@ func TestPathHonoursXDGConfigHome(t *testing.T) {
 	}
 	if want := "/custom/cfg/pnop/config.toml"; got != want {
 		t.Errorf("Path = %q, want %q", got, want)
+	}
+}
+
+func TestSaveLoadDocumentRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "config.toml")
+	want := config.Config{
+		Active: "job",
+		Configs: map[string]config.Entry{
+			"job": {
+				File: "/Users/someone/.npmrc", Vault: "MyVault",
+				Item: "MyItem", Field: "MyField", Registry: "registry.npmjs.org",
+			},
+			"private": {
+				File: "/Users/someone/.npmrc", Vault: "Employee",
+				Item: ".npmrc.private", Field: "password", Registry: "registry.npmjs.org",
+			},
+		},
+	}
+
+	if err := config.Save(path, want); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if got.Active != "job" {
+		t.Errorf("Active = %q, want job", got.Active)
+	}
+	if len(got.Configs) != 2 {
+		t.Fatalf("got %d configs, want 2", len(got.Configs))
+	}
+	if got.Configs["private"].Item != ".npmrc.private" {
+		t.Errorf("private item = %q, want .npmrc.private", got.Configs["private"].Item)
+	}
+}
+
+func TestLoadExpandsTildeInEveryEntry(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home dir")
+	}
+	path := filepath.Join(t.TempDir(), "config.toml")
+	content := `active = "job"
+
+[configs.job]
+file = "~/.npmrc"
+vault = "V"
+item = "I"
+field = "F"
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if want := filepath.Join(home, ".npmrc"); cfg.Configs["job"].File != want {
+		t.Errorf("File = %q, want %q", cfg.Configs["job"].File, want)
 	}
 }
