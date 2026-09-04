@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/frodi-karlsson/pni/internal/runner"
+	"github.com/frodi-karlsson/pnop/internal/runner"
 )
 
 func TestRunReportsZeroOnSuccess(t *testing.T) {
@@ -29,7 +29,7 @@ func TestRunReportsExitCodeWithoutError(t *testing.T) {
 	}
 }
 
-// A killed process reports ExitCode() == -1, which would exit pni with 255 and
+// A killed process reports ExitCode() == -1, which would exit pnop with 255 and
 // look like an ordinary auth failure. It must map to the shell's 128+signum.
 func TestRunMapsSignalDeathTo128PlusSignal(t *testing.T) {
 	code, err := runner.Exec{}.Run(t.Context(), "sh", "-c", "kill -9 $$")
@@ -65,7 +65,7 @@ func TestSignalled(t *testing.T) {
 }
 
 func TestRunErrorsWhenBinaryIsMissing(t *testing.T) {
-	_, err := runner.Exec{}.Run(t.Context(), "pni-definitely-not-a-real-binary")
+	_, err := runner.Exec{}.Run(t.Context(), "pnop-definitely-not-a-real-binary")
 	if err == nil {
 		t.Fatal("Run succeeded, want an error for a missing binary")
 	}
@@ -73,7 +73,7 @@ func TestRunErrorsWhenBinaryIsMissing(t *testing.T) {
 
 // The child must inherit the caller's streams so interactive prompts (such as
 // corepack's "install pnpm x.y.z? [Y/n]") reach the user instead of being
-// swallowed by pni.
+// swallowed by pnop.
 func TestRunInheritsStdioSoPromptsWork(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	r := runner.Exec{

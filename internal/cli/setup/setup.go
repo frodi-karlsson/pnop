@@ -1,13 +1,13 @@
-// Package setup persists pni's configuration and writes the token once.
+// Package setup persists pnop's configuration and writes the token once.
 package setup
 
 import (
 	"context"
 
-	"github.com/frodi-karlsson/pni/internal/config"
-	"github.com/frodi-karlsson/pni/internal/logger"
-	"github.com/frodi-karlsson/pni/internal/npmrc"
-	"github.com/frodi-karlsson/pni/internal/secret"
+	"github.com/frodi-karlsson/pnop/internal/config"
+	"github.com/frodi-karlsson/pnop/internal/logger"
+	"github.com/frodi-karlsson/pnop/internal/npmrc"
+	"github.com/frodi-karlsson/pnop/internal/secret"
 	"github.com/spf13/cobra"
 )
 
@@ -23,15 +23,15 @@ type Deps struct {
 	Log logger.Logger
 }
 
-// Command returns the `pni setup` subcommand.
+// Command returns the `pnop setup` subcommand.
 func Command(load func() (Deps, error)) *cobra.Command {
 	cfg := config.Config{}
 
 	cmd := &cobra.Command{
 		Use:   "setup",
 		Short: "Record where the npm token lives and write it to the npmrc",
-		Long: "Record which npmrc pni keeps in sync and where its token lives in 1Password,\n" +
-			"then fetch the token once. Later runs of `pni` need no flags.",
+		Long: "Record which npmrc pnop keeps in sync and where its token lives in 1Password,\n" +
+			"then fetch the token once. Later runs of `pnop` need no flags.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -43,7 +43,7 @@ func Command(load func() (Deps, error)) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&cfg.File, "file", "~/.npmrc", "npmrc file pni keeps in sync")
+	cmd.Flags().StringVar(&cfg.File, "file", "~/.npmrc", "npmrc file pnop keeps in sync")
 	cmd.Flags().StringVar(&cfg.Vault, "vault", "", "1Password vault holding the token (required)")
 	cmd.Flags().StringVar(&cfg.Item, "item", "", "1Password item holding the token (required)")
 	cmd.Flags().StringVar(&cfg.Field, "field", "", "field on the item holding the token (required)")

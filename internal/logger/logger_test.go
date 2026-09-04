@@ -5,14 +5,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/frodi-karlsson/pni/internal/logger"
+	"github.com/frodi-karlsson/pnop/internal/logger"
 )
 
 func TestInfofPrefixesAndTerminates(t *testing.T) {
 	var sb strings.Builder
 	logger.New(&sb).Infof("wrote %s", "/tmp/.npmrc")
 
-	if want := "pni: wrote /tmp/.npmrc\n"; sb.String() != want {
+	if want := "pnop: wrote /tmp/.npmrc\n"; sb.String() != want {
 		t.Errorf("output = %q, want %q", sb.String(), want)
 	}
 }
@@ -21,7 +21,7 @@ func TestWarnfPrefixesAndTerminates(t *testing.T) {
 	var sb strings.Builder
 	logger.New(&sb).Warnf("%v", errors.New("not signed in"))
 
-	if want := "pni: not signed in\n"; sb.String() != want {
+	if want := "pnop: not signed in\n"; sb.String() != want {
 		t.Errorf("output = %q, want %q", sb.String(), want)
 	}
 }
@@ -30,7 +30,7 @@ func TestDoesNotDoubleUpNewlines(t *testing.T) {
 	var sb strings.Builder
 	logger.New(&sb).Infof("already newline-terminated\n")
 
-	if want := "pni: already newline-terminated\n"; sb.String() != want {
+	if want := "pnop: already newline-terminated\n"; sb.String() != want {
 		t.Errorf("output = %q, want %q", sb.String(), want)
 	}
 }
@@ -41,7 +41,7 @@ func TestMultipleLinesAccumulate(t *testing.T) {
 	l.Infof("first")
 	l.Warnf("second")
 
-	if want := "pni: first\npni: second\n"; sb.String() != want {
+	if want := "pnop: first\npnop: second\n"; sb.String() != want {
 		t.Errorf("output = %q, want %q", sb.String(), want)
 	}
 }

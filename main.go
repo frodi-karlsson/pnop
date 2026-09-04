@@ -1,4 +1,4 @@
-// Command pni wraps `pnpm install` and transparently recovers from an npm
+// Command pnop wraps `pnpm install` and transparently recovers from an npm
 // auth token that has gone stale, refreshing it from 1Password and retrying.
 package main
 
@@ -8,15 +8,15 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/frodi-karlsson/pni/internal/cli"
-	"github.com/frodi-karlsson/pni/internal/cli/install"
-	"github.com/frodi-karlsson/pni/internal/cli/setup"
-	"github.com/frodi-karlsson/pni/internal/config"
-	"github.com/frodi-karlsson/pni/internal/logger"
-	"github.com/frodi-karlsson/pni/internal/npmrc"
-	"github.com/frodi-karlsson/pni/internal/runner"
-	"github.com/frodi-karlsson/pni/internal/secret"
-	"github.com/frodi-karlsson/pni/internal/version"
+	"github.com/frodi-karlsson/pnop/internal/cli"
+	"github.com/frodi-karlsson/pnop/internal/cli/install"
+	"github.com/frodi-karlsson/pnop/internal/cli/setup"
+	"github.com/frodi-karlsson/pnop/internal/config"
+	"github.com/frodi-karlsson/pnop/internal/logger"
+	"github.com/frodi-karlsson/pnop/internal/npmrc"
+	"github.com/frodi-karlsson/pnop/internal/runner"
+	"github.com/frodi-karlsson/pnop/internal/secret"
+	"github.com/frodi-karlsson/pnop/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -30,10 +30,10 @@ func main() {
 
 func newRoot() *cobra.Command {
 	root := &cobra.Command{
-		Use:     "pni [pnpm args...]",
+		Use:     "pnop [pnpm args...]",
 		Short:   "pnpm install, with automatic npm token recovery",
 		Version: version.Version,
-		Long: "pni runs `pnpm install`. If that fails, it compares the npm token in your\n" +
+		Long: "pnop runs `pnpm install`. If that fails, it compares the npm token in your\n" +
 			"managed npmrc against 1Password; when the token is stale it refreshes the\n" +
 			"file and retries, and when it is already current it leaves the original\n" +
 			"failure alone.",
@@ -43,7 +43,7 @@ func newRoot() *cobra.Command {
 		// Errors are reported once, by exitCode, so cobra must not also print them.
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Bare `pni` is `pni install`; flag parsing is off so that pnpm's
+			// Bare `pnop` is `pnop install`; flag parsing is off so that pnpm's
 			// own flags pass straight through.
 			if len(args) > 0 {
 				switch args[0] {
@@ -108,6 +108,6 @@ func exitCode(err error) int {
 	if errors.As(err, &exitErr) {
 		return exitErr.Code
 	}
-	fmt.Fprintf(os.Stderr, "pni: %v\n", err)
+	fmt.Fprintf(os.Stderr, "pnop: %v\n", err)
 	return 1
 }

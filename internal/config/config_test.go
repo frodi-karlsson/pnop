@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/frodi-karlsson/pni/internal/config"
+	"github.com/frodi-karlsson/pnop/internal/config"
 )
 
 func TestSaveLoadRoundTrip(t *testing.T) {
@@ -144,7 +144,7 @@ func TestWithDefaults(t *testing.T) {
 	}
 }
 
-// Vault, item and field describe the user's own 1Password layout, so pni must
+// Vault, item and field describe the user's own 1Password layout, so pnop must
 // never guess them.
 func TestWithDefaultsNeverGuessesTheItemLayout(t *testing.T) {
 	got := config.Config{File: "/tmp/.npmrc"}.WithDefaults()
@@ -215,7 +215,7 @@ func TestPathHonoursXDGConfigHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Path: %v", err)
 	}
-	if want := "/custom/cfg/pni/config.toml"; got != want {
+	if want := "/custom/cfg/pnop/config.toml"; got != want {
 		t.Errorf("Path = %q, want %q", got, want)
 	}
 }

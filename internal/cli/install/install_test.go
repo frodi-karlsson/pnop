@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/frodi-karlsson/pni/internal/cli"
-	"github.com/frodi-karlsson/pni/internal/cli/install"
-	"github.com/frodi-karlsson/pni/internal/config"
-	"github.com/frodi-karlsson/pni/internal/logger"
+	"github.com/frodi-karlsson/pnop/internal/cli"
+	"github.com/frodi-karlsson/pnop/internal/cli/install"
+	"github.com/frodi-karlsson/pnop/internal/config"
+	"github.com/frodi-karlsson/pnop/internal/logger"
 )
 
 const (
@@ -153,7 +153,7 @@ func TestStaleTokenIsRefreshedAndInstallRetried(t *testing.T) {
 	}
 }
 
-// The token is a credential: it must never reach pni's own output, on any path.
+// The token is a credential: it must never reach pnop's own output, on any path.
 func TestTokenIsNeverLogged(t *testing.T) {
 	var log strings.Builder
 	r := &fakeRunner{codes: []int{17, 0}}
@@ -172,7 +172,7 @@ func TestTokenIsNeverLogged(t *testing.T) {
 	}
 }
 
-// A killed pnpm says nothing about credentials, so pni must not prompt
+// A killed pnpm says nothing about credentials, so pnop must not prompt
 // 1Password or retry the install.
 func TestSignalledFailureSkipsTheTokenCheck(t *testing.T) {
 	r := &fakeRunner{codes: []int{137}} // SIGKILL

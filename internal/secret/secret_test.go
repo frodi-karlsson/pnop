@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/frodi-karlsson/pni/internal/secret"
+	"github.com/frodi-karlsson/pnop/internal/secret"
 )
 
 // stubOP writes a fake `op` executable and returns its path.
@@ -77,7 +77,7 @@ func TestFetchSurfacesOPFailure(t *testing.T) {
 }
 
 func TestFetchReportsAMissingOPBinary(t *testing.T) {
-	op := secret.OP{Bin: "pni-definitely-not-a-real-op"}
+	op := secret.OP{Bin: "pnop-definitely-not-a-real-op"}
 
 	_, err := op.Fetch(t.Context(), "MyVault", "item", "tokenfield")
 	if err == nil {

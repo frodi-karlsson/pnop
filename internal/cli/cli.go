@@ -1,9 +1,9 @@
-// Package cli holds types shared by pni's commands.
+// Package cli holds types shared by pnop's commands.
 package cli
 
 import "strconv"
 
-// ExitError carries a child process's exit code up to main so pni can exit
+// ExitError carries a child process's exit code up to main so pnop can exit
 // with the same status the package manager did.
 type ExitError struct {
 	Code int

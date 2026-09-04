@@ -5,7 +5,7 @@ before:
     - go mod tidy
 
 builds:
-  - id: pni
+  - id: pnop
     goos:
       - linux
       - darwin
@@ -13,9 +13,9 @@ builds:
       - amd64
       - arm64
     main: .
-    binary: pni
+    binary: pnop
     ldflags:
-      - -s -w -X github.com/frodi-karlsson/pni/internal/version.Version={{.Version}}
+      - -s -w -X github.com/frodi-karlsson/pnop/internal/version.Version={{.Version}}
 
 archives:
   - formats: [tar.gz]
@@ -41,9 +41,9 @@ release:
   prerelease: auto
 
 homebrew_casks:
-  - name: pni
+  - name: pnop
     binaries:
-      - pni
+      - pnop
     repository:
       owner: frodi-karlsson
       name: homebrew-tap
@@ -52,7 +52,7 @@ homebrew_casks:
     commit_author:
       name: goreleaserbot
       email: goreleaser@carlosbecker.com
-    homepage: "https://github.com/frodi-karlsson/pni"
+    homepage: "https://github.com/frodi-karlsson/pnop"
     description: "pnpm install with automatic npm token recovery from 1Password"
     license: "MIT"
     hooks:
@@ -61,5 +61,5 @@ homebrew_casks:
         # Gatekeeper refuses to run it. Strip the attribute on install.
         install: |
           if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/pni"]
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/pnop"]
           end

@@ -1,6 +1,6 @@
-// Package logger provides pni's progress output.
+// Package logger provides pnop's progress output.
 //
-// Everything here writes to stderr in practice, so that pni's own chatter
+// Everything here writes to stderr in practice, so that pnop's own chatter
 // never contaminates the package manager's stdout.
 package logger
 
@@ -9,8 +9,8 @@ import (
 	"io"
 )
 
-// Prefix identifies pni's own lines in amongst pnpm's output.
-const Prefix = "pni: "
+// Prefix identifies pnop's own lines in amongst pnpm's output.
+const Prefix = "pnop: "
 
 // Logger reports progress to the user. It is an interface so commands can be
 // tested without producing output.
@@ -48,7 +48,7 @@ func (l writerLogger) Warnf(format string, args ...any) {
 }
 
 // write is best-effort: failing to print progress must never mask the exit
-// code pni is trying to report.
+// code pnop is trying to report.
 func (l writerLogger) write(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	if len(msg) == 0 || msg[len(msg)-1] != '\n' {

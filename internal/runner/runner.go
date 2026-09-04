@@ -46,7 +46,7 @@ func (e Exec) Run(ctx context.Context, name string, args ...string) (int, error)
 // waitStatusCode converts a process result to a shell-style exit code.
 // ExitCode reports -1 for a signalled process, so a killed child is mapped to
 // the conventional 128+signum rather than surfacing as -1 (which would exit
-// pni with 255 and look like an ordinary failure).
+// pnop with 255 and look like an ordinary failure).
 func waitStatusCode(exitErr *exec.ExitError) int {
 	if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 		return 128 + int(status.Signal())

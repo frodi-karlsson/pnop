@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/frodi-karlsson/pni/internal/cli/setup"
-	"github.com/frodi-karlsson/pni/internal/config"
-	"github.com/frodi-karlsson/pni/internal/logger"
+	"github.com/frodi-karlsson/pnop/internal/cli/setup"
+	"github.com/frodi-karlsson/pnop/internal/config"
+	"github.com/frodi-karlsson/pnop/internal/logger"
 )
 
 type fakeSecret struct {
@@ -79,7 +79,7 @@ func TestWritesTokenAndConfig(t *testing.T) {
 	d := deps(t, sec, n, saved)
 
 	err := setup.Run(t.Context(), d, config.Config{
-		File: "/tmp/pni-test/.npmrc", Vault: "MyVault", Item: "MyItem", Field: "tokenfield",
+		File: "/tmp/pnop-test/.npmrc", Vault: "MyVault", Item: "MyItem", Field: "tokenfield",
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -88,8 +88,8 @@ func TestWritesTokenAndConfig(t *testing.T) {
 	if n.token != "npm_tok" {
 		t.Errorf("wrote token %q, want npm_tok", n.token)
 	}
-	if n.path != "/tmp/pni-test/.npmrc" {
-		t.Errorf("wrote to %q, want /tmp/pni-test/.npmrc", n.path)
+	if n.path != "/tmp/pnop-test/.npmrc" {
+		t.Errorf("wrote to %q, want /tmp/pnop-test/.npmrc", n.path)
 	}
 	if n.registry != "registry.npmjs.org" {
 		t.Errorf("registry = %q, want the default", n.registry)
@@ -141,7 +141,7 @@ func TestExpandsTildeBeforeSaving(t *testing.T) {
 	}
 }
 
-// pni makes no assumptions about the user's 1Password layout, so every
+// pnop makes no assumptions about the user's 1Password layout, so every
 // coordinate has to be supplied explicitly.
 func TestRequiresEveryItemCoordinate(t *testing.T) {
 	tests := []struct {

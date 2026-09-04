@@ -1,4 +1,4 @@
-module github.com/frodi-karlsson/pni
+module github.com/frodi-karlsson/pnop
 
 go 1.26.4
 

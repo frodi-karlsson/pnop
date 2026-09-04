@@ -1,4 +1,4 @@
-// Package config persists which npmrc file pni manages and where the token
+// Package config persists which npmrc file pnop manages and where the token
 // lives in 1Password.
 package config
 
@@ -11,12 +11,12 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
-	"github.com/frodi-karlsson/pni/internal/npmrc"
+	"github.com/frodi-karlsson/pnop/internal/npmrc"
 )
 
-// Config is the on-disk configuration written by `pni setup`.
+// Config is the on-disk configuration written by `pnop setup`.
 type Config struct {
-	// File is the npmrc pni keeps in sync. pnpm reads ~/.npmrc.
+	// File is the npmrc pnop keeps in sync. pnpm reads ~/.npmrc.
 	File string `toml:"file"`
 	// Vault, Item and Field locate the token in 1Password.
 	Vault string `toml:"vault"`
@@ -26,19 +26,19 @@ type Config struct {
 	Registry string `toml:"registry"`
 }
 
-// ErrNotConfigured is returned by Load when `pni setup` has never been run.
-var ErrNotConfigured = errors.New("pni is not configured yet - run: pni setup --file=~/.npmrc --vault=<vault> --item=<item> --field=<field>")
+// ErrNotConfigured is returned by Load when `pnop setup` has never been run.
+var ErrNotConfigured = errors.New("pnop is not configured yet - run: pnop setup --file=~/.npmrc --vault=<vault> --item=<item> --field=<field>")
 
 // Path returns the config file location, honouring XDG_CONFIG_HOME.
 func Path() (string, error) {
 	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
-		return filepath.Join(dir, "pni", "config.toml"), nil
+		return filepath.Join(dir, "pnop", "config.toml"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("locate home dir: %w", err)
 	}
-	return filepath.Join(home, ".config", "pni", "config.toml"), nil
+	return filepath.Join(home, ".config", "pnop", "config.toml"), nil
 }
 
 // Load reads the config at path. A missing file yields ErrNotConfigured so the
@@ -110,7 +110,7 @@ func (c Config) Validate() error {
 
 // WithDefaults fills in the optional fields that callers may leave blank.
 // Vault, Item and Field have no defaults: they describe the user's own
-// 1Password layout, which pni makes no assumptions about.
+// 1Password layout, which pnop makes no assumptions about.
 func (c Config) WithDefaults() Config {
 	if c.Registry == "" {
 		c.Registry = npmrc.DefaultRegistry

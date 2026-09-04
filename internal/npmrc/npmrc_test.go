@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/frodi-karlsson/pni/internal/npmrc"
+	"github.com/frodi-karlsson/pnop/internal/npmrc"
 )
 
 const registry = npmrc.DefaultRegistry
@@ -127,7 +127,7 @@ func TestWriteTokenLeavesNoTempFiles(t *testing.T) {
 	}
 }
 
-// npm honours the last matching line, so pni must read and rewrite that one.
+// npm honours the last matching line, so pnop must read and rewrite that one.
 // Acting on the first would either miss a stale token or "fix" an ineffective
 // line and report success while the install keeps failing.
 func TestLastDuplicateEntryWins(t *testing.T) {
@@ -182,7 +182,7 @@ func TestWriteTokenFollowsSymlinks(t *testing.T) {
 	}
 }
 
-// Two pni runs in two terminals must not lose each other's unrelated entries.
+// Two pnop runs in two terminals must not lose each other's unrelated entries.
 func TestConcurrentWritesPreserveEveryEntry(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".npmrc")
 	if err := os.WriteFile(path, []byte("engine-strict=true\n"), 0o600); err != nil {

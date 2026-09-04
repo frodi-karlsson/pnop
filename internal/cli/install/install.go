@@ -4,16 +4,16 @@ package install
 import (
 	"context"
 
-	"github.com/frodi-karlsson/pni/internal/cli"
-	"github.com/frodi-karlsson/pni/internal/config"
-	"github.com/frodi-karlsson/pni/internal/logger"
-	"github.com/frodi-karlsson/pni/internal/npmrc"
-	"github.com/frodi-karlsson/pni/internal/runner"
-	"github.com/frodi-karlsson/pni/internal/secret"
+	"github.com/frodi-karlsson/pnop/internal/cli"
+	"github.com/frodi-karlsson/pnop/internal/config"
+	"github.com/frodi-karlsson/pnop/internal/logger"
+	"github.com/frodi-karlsson/pnop/internal/npmrc"
+	"github.com/frodi-karlsson/pnop/internal/runner"
+	"github.com/frodi-karlsson/pnop/internal/secret"
 	"github.com/spf13/cobra"
 )
 
-// PackageManager is the command pni wraps.
+// PackageManager is the command pnop wraps.
 const PackageManager = "pnpm"
 
 // Deps are the collaborators Run needs. They are injected so the decision
@@ -23,11 +23,11 @@ type Deps struct {
 	Secret secret.Fetcher
 	Npmrc  npmrc.Store
 	Runner runner.Runner
-	// Log receives pni's own progress messages, never the token itself.
+	// Log receives pnop's own progress messages, never the token itself.
 	Log logger.Logger
 }
 
-// Command returns the explicit `pni install` subcommand. Bare `pni` reaches
+// Command returns the explicit `pnop install` subcommand. Bare `pnop` reaches
 // the same code path via Run.
 func Command(load func() (Deps, error)) *cobra.Command {
 	return &cobra.Command{

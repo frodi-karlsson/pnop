@@ -1,10 +1,10 @@
 .PHONY: help build install test test-race lint lint-fix check clean
 
-build: ## Build the pni binary into bin/
+build: ## Build the pnop binary into bin/
 	@mkdir -p bin
-	go build -o bin/pni ./
+	go build -o bin/pnop ./
 
-install: ## Install pni to $(GOPATH)/bin
+install: ## Install pnop to $(GOPATH)/bin
 	go install ./
 
 test: ## Run unit tests

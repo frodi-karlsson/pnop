@@ -11,7 +11,7 @@ import (
 	"syscall"
 )
 
-// DefaultRegistry is the registry whose auth token pni manages by default.
+// DefaultRegistry is the registry whose auth token pnop manages by default.
 const DefaultRegistry = "registry.npmjs.org"
 
 // fileMode is deliberately owner-only: these files hold credentials.
@@ -59,7 +59,7 @@ func (FileStore) ReadToken(path, registry string) (string, error) {
 // every other line intact.
 //
 // The read-modify-write is guarded by an advisory lock on a sibling lock file
-// so that two concurrent pni runs cannot lose each other's unrelated lines,
+// so that two concurrent pnop runs cannot lose each other's unrelated lines,
 // and the new content is fsynced and renamed into place so a crash can never
 // leave a truncated or empty npmrc.
 func (FileStore) WriteToken(path, registry, token string) error {
