@@ -1,5 +1,5 @@
-// Package install runs `pnpm install` and recovers from a stale npm token.
-package install
+// Package passthrough runs any pnpm command and recovers from a stale npm token.
+package passthrough
 
 import (
 	"context"
@@ -10,7 +10,6 @@ import (
 	"github.com/frodi-karlsson/pnop/internal/npmrc"
 	"github.com/frodi-karlsson/pnop/internal/runner"
 	"github.com/frodi-karlsson/pnop/internal/secret"
-	"github.com/spf13/cobra"
 )
 
 // PackageManager is the command pnop wraps.
@@ -27,31 +26,18 @@ type Deps struct {
 	Log logger.Logger
 }
 
-// Command returns the explicit `pnop install` subcommand. Bare `pnop` reaches
-// the same code path via Run.
-func Command(load func() (Deps, error)) *cobra.Command {
-	return &cobra.Command{
-		Use:   "install [pnpm args...]",
-		Short: "Run pnpm install, refreshing a stale npm token if it fails",
-		// pnpm's own flags must reach pnpm rather than being parsed here.
-		DisableFlagParsing: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			deps, err := load()
-			if err != nil {
-				return err
-			}
-			return Run(cmd.Context(), deps, args)
-		},
-		SilenceUsage: true,
-	}
-}
-
-// Run executes `pnpm install`. On success it returns nil. On failure it
-// compares the token in the managed npmrc against 1Password: if they already
-// match, the failure was not a stale token and the original exit code is
-// returned untouched. Otherwise the npmrc is refreshed and the install retried.
+// Run executes pnpm with args forwarded verbatim. On success it returns nil.
+// On failure it compares the token in the managed npmrc against 1Password: if
+// they already match, the failure was not a stale token and the original exit
+// code is returned untouched. Otherwise the npmrc is refreshed and the command
+// rerun once.
+//
+// pnop deliberately does not inspect the command's output. The token
+// comparison is the only gate, and it doubles as a safety gate: a rerun only
+// happens when the token actually changed, which means the first attempt was
+// rejected by the registry and cannot have had a side effect.
 func Run(ctx context.Context, d Deps, args []string) error {
-	code, err := d.Runner.Run(ctx, PackageManager, append([]string{"install"}, args...)...)
+	code, err := d.Runner.Run(ctx, PackageManager, args...)
 	if err != nil {
 		return err
 	}
@@ -61,11 +47,11 @@ func Run(ctx context.Context, d Deps, args []string) error {
 
 	if runner.Signalled(code) {
 		// The child was killed rather than rejected; credentials are not the
-		// problem, so don't prompt 1Password or retry.
+		// problem, so don't prompt 1Password or rerun.
 		return cli.Exit(code)
 	}
 
-	d.Log.Infof("%s install failed (exit %d) - checking the npm token...", PackageManager, code)
+	d.Log.Infof("%s failed (exit %d) - checking the npm token...", PackageManager, code)
 
 	refreshed, err := refreshToken(ctx, d)
 	if err != nil {
@@ -79,7 +65,7 @@ func Run(ctx context.Context, d Deps, args []string) error {
 
 	d.Log.Infof("token was stale, updated %s - retrying...", d.Entry.File)
 
-	retryCode, err := d.Runner.Run(ctx, PackageManager, append([]string{"install"}, args...)...)
+	retryCode, err := d.Runner.Run(ctx, PackageManager, args...)
 	if err != nil {
 		return err
 	}

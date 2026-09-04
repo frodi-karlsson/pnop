@@ -1,4 +1,4 @@
-package install_test
+package passthrough_test
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/frodi-karlsson/pnop/internal/cli"
-	"github.com/frodi-karlsson/pnop/internal/cli/install"
+	"github.com/frodi-karlsson/pnop/internal/cli/passthrough"
 	"github.com/frodi-karlsson/pnop/internal/config"
 	"github.com/frodi-karlsson/pnop/internal/logger"
 )
@@ -33,6 +33,10 @@ func (f *fakeRunner) Run(_ context.Context, name string, args ...string) (int, e
 		return 0, nil
 	}
 	return f.codes[len(f.calls)-1], nil
+}
+
+func (f *fakeRunner) Output(_ context.Context, _ string, _ ...string) (string, int, error) {
+	return "", 0, nil
 }
 
 type fakeSecret struct {
@@ -69,8 +73,8 @@ func (f *fakeNpmrc) WriteToken(_, _, token string) error {
 	return nil
 }
 
-func deps(r *fakeRunner, s *fakeSecret, n *fakeNpmrc, log logger.Logger) install.Deps {
-	return install.Deps{
+func deps(r *fakeRunner, s *fakeSecret, n *fakeNpmrc, log logger.Logger) passthrough.Deps {
+	return passthrough.Deps{
 		Entry: config.Entry{
 			File: "/tmp/.npmrc", Vault: "MyVault", Item: "MyItem", Field: "tokenfield",
 		}.WithDefaults(),
@@ -86,7 +90,7 @@ func TestSucceedsFirstTryWithoutTouchingOnePassword(t *testing.T) {
 	s := &fakeSecret{token: freshToken}
 	n := &fakeNpmrc{token: staleToken}
 
-	if err := install.Run(t.Context(), deps(r, s, n, logger.Discard()), nil); err != nil {
+	if err := passthrough.Run(t.Context(), deps(r, s, n, logger.Discard()), nil); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -101,18 +105,32 @@ func TestSucceedsFirstTryWithoutTouchingOnePassword(t *testing.T) {
 	}
 }
 
-func TestPassesArgsThroughToPnpm(t *testing.T) {
-	r := &fakeRunner{codes: []int{0}}
-
-	err := install.Run(t.Context(), deps(r, &fakeSecret{}, &fakeNpmrc{}, logger.Discard()),
-		[]string{"--frozen-lockfile", "--filter", "web"})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
+// argv reaches pnpm untouched - no subcommand is injected.
+func TestForwardsArgvVerbatim(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"install", []string{"install"}, []string{"pnpm", "install"}},
+		{"install with flags", []string{"install", "--frozen-lockfile"}, []string{"pnpm", "install", "--frozen-lockfile"}},
+		{"up", []string{"up", "--latest"}, []string{"pnpm", "up", "--latest"}},
+		{"run script", []string{"run", "build"}, []string{"pnpm", "run", "build"}},
+		{"publish", []string{"publish", "--dry-run"}, []string{"pnpm", "publish", "--dry-run"}},
+		{"no args", nil, []string{"pnpm"}},
 	}
 
-	want := []string{"pnpm", "install", "--frozen-lockfile", "--filter", "web"}
-	if got := r.calls[0]; !equal(got, want) {
-		t.Errorf("invocation = %v, want %v", got, want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &fakeRunner{codes: []int{0}}
+
+			if err := passthrough.Run(t.Context(), deps(r, &fakeSecret{}, &fakeNpmrc{}, logger.Discard()), tt.args); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if got := r.calls[0]; !equal(got, tt.want) {
+				t.Errorf("invocation = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -122,7 +140,7 @@ func TestCurrentTokenExposesOriginalFailure(t *testing.T) {
 	n := &fakeNpmrc{token: freshToken} // already matches 1Password
 	var log strings.Builder
 
-	err := install.Run(t.Context(), deps(r, s, n, logger.New(&log)), nil)
+	err := passthrough.Run(t.Context(), deps(r, s, n, logger.New(&log)), nil)
 
 	assertExitCode(t, err, 17)
 	if len(r.calls) != 1 {
@@ -141,7 +159,7 @@ func TestStaleTokenIsRefreshedAndInstallRetried(t *testing.T) {
 	s := &fakeSecret{token: freshToken}
 	n := &fakeNpmrc{token: staleToken}
 
-	if err := install.Run(t.Context(), deps(r, s, n, logger.Discard()), nil); err != nil {
+	if err := passthrough.Run(t.Context(), deps(r, s, n, logger.Discard()), nil); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -153,6 +171,27 @@ func TestStaleTokenIsRefreshedAndInstallRetried(t *testing.T) {
 	}
 }
 
+// Recovery is not limited to install: any failing command gets it.
+func TestRecoversForAnyCommand(t *testing.T) {
+	for _, cmd := range []string{"install", "up", "add", "publish"} {
+		t.Run(cmd, func(t *testing.T) {
+			r := &fakeRunner{codes: []int{1, 0}}
+			s := &fakeSecret{token: freshToken}
+			n := &fakeNpmrc{token: staleToken}
+
+			if err := passthrough.Run(t.Context(), deps(r, s, n, logger.Discard()), []string{cmd}); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if len(r.calls) != 2 {
+				t.Errorf("ran pnpm %d times, want 2 (retry after refresh)", len(r.calls))
+			}
+			if len(n.writes) != 1 {
+				t.Errorf("npmrc writes = %v, want one", n.writes)
+			}
+		})
+	}
+}
+
 // The token is a credential: it must never reach pnop's own output, on any path.
 func TestTokenIsNeverLogged(t *testing.T) {
 	var log strings.Builder
@@ -160,7 +199,7 @@ func TestTokenIsNeverLogged(t *testing.T) {
 	s := &fakeSecret{token: freshToken}
 	n := &fakeNpmrc{token: staleToken}
 
-	if err := install.Run(t.Context(), deps(r, s, n, logger.New(&log)), nil); err != nil {
+	if err := passthrough.Run(t.Context(), deps(r, s, n, logger.New(&log)), nil); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -179,7 +218,7 @@ func TestSignalledFailureSkipsTheTokenCheck(t *testing.T) {
 	s := &fakeSecret{token: freshToken}
 	n := &fakeNpmrc{token: staleToken}
 
-	err := install.Run(t.Context(), deps(r, s, n, logger.Discard()), nil)
+	err := passthrough.Run(t.Context(), deps(r, s, n, logger.Discard()), nil)
 
 	assertExitCode(t, err, 137)
 	if s.calls != 0 {
@@ -195,7 +234,7 @@ func TestRetryFailureReportsSecondExitCode(t *testing.T) {
 	s := &fakeSecret{token: freshToken}
 	n := &fakeNpmrc{token: staleToken}
 
-	err := install.Run(t.Context(), deps(r, s, n, logger.Discard()), nil)
+	err := passthrough.Run(t.Context(), deps(r, s, n, logger.Discard()), nil)
 
 	assertExitCode(t, err, 9)
 }
@@ -205,7 +244,7 @@ func TestMissingNpmrcCountsAsStale(t *testing.T) {
 	s := &fakeSecret{token: freshToken}
 	n := &fakeNpmrc{token: ""} // no npmrc entry yet
 
-	if err := install.Run(t.Context(), deps(r, s, n, logger.Discard()), nil); err != nil {
+	if err := passthrough.Run(t.Context(), deps(r, s, n, logger.Discard()), nil); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -220,7 +259,7 @@ func TestOnePasswordFailureKeepsOriginalExitCode(t *testing.T) {
 	n := &fakeNpmrc{token: staleToken}
 	var log strings.Builder
 
-	err := install.Run(t.Context(), deps(r, s, n, logger.New(&log)), nil)
+	err := passthrough.Run(t.Context(), deps(r, s, n, logger.New(&log)), nil)
 
 	assertExitCode(t, err, 17)
 	if len(r.calls) != 1 {
@@ -236,7 +275,7 @@ func TestNpmrcWriteFailureKeepsOriginalExitCode(t *testing.T) {
 	s := &fakeSecret{token: freshToken}
 	n := &fakeNpmrc{token: staleToken, writeErr: errors.New("permission denied")}
 
-	err := install.Run(t.Context(), deps(r, s, n, logger.Discard()), nil)
+	err := passthrough.Run(t.Context(), deps(r, s, n, logger.Discard()), nil)
 
 	assertExitCode(t, err, 17)
 	if len(r.calls) != 1 {
@@ -249,7 +288,7 @@ func TestNpmrcReadFailureKeepsOriginalExitCode(t *testing.T) {
 	s := &fakeSecret{token: freshToken}
 	n := &fakeNpmrc{readErr: errors.New("permission denied")}
 
-	err := install.Run(t.Context(), deps(r, s, n, logger.Discard()), nil)
+	err := passthrough.Run(t.Context(), deps(r, s, n, logger.Discard()), nil)
 
 	assertExitCode(t, err, 17)
 	if s.calls != 0 {
@@ -260,7 +299,7 @@ func TestNpmrcReadFailureKeepsOriginalExitCode(t *testing.T) {
 func TestPnpmMissingIsAnError(t *testing.T) {
 	r := &fakeRunner{err: errors.New("executable file not found")}
 
-	err := install.Run(t.Context(), deps(r, &fakeSecret{}, &fakeNpmrc{}, logger.Discard()), nil)
+	err := passthrough.Run(t.Context(), deps(r, &fakeSecret{}, &fakeNpmrc{}, logger.Discard()), nil)
 
 	if err == nil {
 		t.Fatal("Run succeeded, want an error")
