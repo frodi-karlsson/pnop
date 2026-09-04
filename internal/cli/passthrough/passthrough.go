@@ -18,10 +18,13 @@ const PackageManager = "pnpm"
 // Deps are the collaborators Run needs. They are injected so the decision
 // logic can be tested without a real pnpm, 1Password or filesystem.
 type Deps struct {
-	Entry  config.Entry
-	Secret secret.Fetcher
-	Npmrc  npmrc.Store
-	Runner runner.Runner
+	// LoadEntry resolves the active credential config. It is called only when
+	// a command has already failed, so pnop works as a plain pnpm alias
+	// before `pnop setup` has ever been run.
+	LoadEntry func() (config.Entry, error)
+	Secret    secret.Fetcher
+	Npmrc     npmrc.Store
+	Runner    runner.Runner
 	// Log receives pnop's own progress messages, never the token itself.
 	Log logger.Logger
 }
@@ -53,7 +56,13 @@ func Run(ctx context.Context, d Deps, args []string) error {
 
 	d.Log.Infof("%s failed (exit %d) - checking the npm token...", PackageManager, code)
 
-	refreshed, err := refreshToken(ctx, d)
+	entry, err := d.LoadEntry()
+	if err != nil {
+		d.Log.Warnf("%v", err)
+		return cli.Exit(code)
+	}
+
+	refreshed, err := refreshToken(ctx, d, entry)
 	if err != nil {
 		d.Log.Warnf("%v", err)
 		return cli.Exit(code)
@@ -63,7 +72,7 @@ func Run(ctx context.Context, d Deps, args []string) error {
 		return cli.Exit(code)
 	}
 
-	d.Log.Infof("token was stale, updated %s - retrying...", d.Entry.File)
+	d.Log.Infof("token was stale, updated %s - retrying...", entry.File)
 
 	retryCode, err := d.Runner.Run(ctx, PackageManager, args...)
 	if err != nil {
@@ -73,13 +82,13 @@ func Run(ctx context.Context, d Deps, args []string) error {
 }
 
 // refreshToken reports whether the managed npmrc was actually changed.
-func refreshToken(ctx context.Context, d Deps) (bool, error) {
-	current, err := d.Npmrc.ReadToken(d.Entry.File, d.Entry.Registry)
+func refreshToken(ctx context.Context, d Deps, entry config.Entry) (bool, error) {
+	current, err := d.Npmrc.ReadToken(entry.File, entry.Registry)
 	if err != nil {
 		return false, err
 	}
 
-	fresh, err := d.Secret.Fetch(ctx, d.Entry.Vault, d.Entry.Item, d.Entry.Field)
+	fresh, err := d.Secret.Fetch(ctx, entry.Vault, entry.Item, entry.Field)
 	if err != nil {
 		return false, err
 	}
@@ -87,7 +96,7 @@ func refreshToken(ctx context.Context, d Deps) (bool, error) {
 	if fresh == current {
 		return false, nil
 	}
-	if err := d.Npmrc.WriteToken(d.Entry.File, d.Entry.Registry, fresh); err != nil {
+	if err := d.Npmrc.WriteToken(entry.File, entry.Registry, fresh); err != nil {
 		return false, err
 	}
 	return true, nil

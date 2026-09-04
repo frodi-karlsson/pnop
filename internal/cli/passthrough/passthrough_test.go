@@ -75,9 +75,11 @@ func (f *fakeNpmrc) WriteToken(_, _, token string) error {
 
 func deps(r *fakeRunner, s *fakeSecret, n *fakeNpmrc, log logger.Logger) passthrough.Deps {
 	return passthrough.Deps{
-		Entry: config.Entry{
-			File: "/tmp/.npmrc", Vault: "MyVault", Item: "MyItem", Field: "tokenfield",
-		}.WithDefaults(),
+		LoadEntry: func() (config.Entry, error) {
+			return config.Entry{
+				File: "/tmp/.npmrc", Vault: "MyVault", Item: "MyItem", Field: "tokenfield",
+			}.WithDefaults(), nil
+		},
 		Secret: s,
 		Npmrc:  n,
 		Runner: r,
@@ -318,6 +320,59 @@ func assertExitCode(t *testing.T, err error, want int) {
 	}
 	if exitErr.Code != want {
 		t.Errorf("exit code = %d, want %d", exitErr.Code, want)
+	}
+}
+
+// pnop must work as a plain pnpm alias before `pnop setup` has ever run: a
+// successful command must never touch the config.
+func TestSuccessNeverLoadsConfig(t *testing.T) {
+	loaded := false
+	d := passthrough.Deps{
+		LoadEntry: func() (config.Entry, error) {
+			loaded = true
+			return config.Entry{}, errors.New("not configured")
+		},
+		Secret: &fakeSecret{},
+		Npmrc:  &fakeNpmrc{},
+		Runner: &fakeRunner{codes: []int{0}},
+		Log:    logger.Discard(),
+	}
+
+	if err := passthrough.Run(t.Context(), d, []string{"run", "build"}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if loaded {
+		t.Error("config was loaded on the success path")
+	}
+}
+
+// An unconfigured pnop must still surface pnpm's own failure, not replace it
+// with a configuration error.
+func TestUnconfiguredFailurePreservesExitCode(t *testing.T) {
+	var log strings.Builder
+	r := &fakeRunner{codes: []int{17}}
+	s := &fakeSecret{token: freshToken}
+	d := passthrough.Deps{
+		LoadEntry: func() (config.Entry, error) {
+			return config.Entry{}, errors.New("pnop is not configured yet")
+		},
+		Secret: s,
+		Npmrc:  &fakeNpmrc{},
+		Runner: r,
+		Log:    logger.New(&log),
+	}
+
+	err := passthrough.Run(t.Context(), d, []string{"install"})
+
+	assertExitCode(t, err, 17)
+	if len(r.calls) != 1 {
+		t.Errorf("ran pnpm %d times, want 1 (no retry)", len(r.calls))
+	}
+	if s.calls != 0 {
+		t.Errorf("hit 1Password %d times, want 0 when unconfigured", s.calls)
+	}
+	if !strings.Contains(log.String(), "not configured") {
+		t.Errorf("log = %q, want it to explain the config problem", log.String())
 	}
 }
 

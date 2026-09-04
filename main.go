@@ -56,11 +56,7 @@ func newRoot() *cobra.Command {
 				return printVersions(cmd.Context(), cmd.OutOrStdout())
 			}
 
-			deps, err := passthroughDeps()
-			if err != nil {
-				return err
-			}
-			return passthrough.Run(cmd.Context(), deps, args)
+			return passthrough.Run(cmd.Context(), passthroughDeps(), args)
 		},
 	}
 
@@ -88,27 +84,28 @@ func execRunner() runner.Exec {
 	return runner.Exec{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
 }
 
-func passthroughDeps() (passthrough.Deps, error) {
+func passthroughDeps() passthrough.Deps {
+	return passthrough.Deps{
+		LoadEntry: loadActiveEntry,
+		Secret:    secret.OP{Stdin: os.Stdin, Stderr: os.Stderr},
+		Npmrc:     npmrc.FileStore{},
+		Runner:    execRunner(),
+		Log:       logger.New(os.Stderr),
+	}
+}
+
+// loadActiveEntry resolves the config the active profile points at. It is
+// deliberately not called until a pnpm command has failed.
+func loadActiveEntry() (config.Entry, error) {
 	path, err := config.Path()
 	if err != nil {
-		return passthrough.Deps{}, err
+		return config.Entry{}, err
 	}
 	cfg, err := config.Load(path)
 	if err != nil {
-		return passthrough.Deps{}, err
+		return config.Entry{}, err
 	}
-	entry, err := cfg.ActiveEntry()
-	if err != nil {
-		return passthrough.Deps{}, err
-	}
-
-	return passthrough.Deps{
-		Entry:  entry,
-		Secret: secret.OP{Stdin: os.Stdin, Stderr: os.Stderr},
-		Npmrc:  npmrc.FileStore{},
-		Runner: execRunner(),
-		Log:    logger.New(os.Stderr),
-	}, nil
+	return cfg.ActiveEntry()
 }
 
 func setupDeps() (setup.Deps, error) {
