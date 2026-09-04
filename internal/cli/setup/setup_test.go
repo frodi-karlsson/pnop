@@ -3,9 +3,7 @@ package setup_test
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/frodi-karlsson/pnop/internal/cli/setup"
@@ -45,142 +43,151 @@ func (f *fakeNpmrc) WriteToken(path, registry, token string) error {
 	return nil
 }
 
-type savedConfig struct {
-	path string
-	cfg  config.Entry
-	err  error
-	n    int
+// stubStore stands in for the on-disk config document.
+type stubStore struct {
+	cfg     config.Config
+	loadErr error
+	saved   config.Config
+	saveErr error
+	saveN   int
 }
 
-func (s *savedConfig) save(path string, cfg config.Entry) error {
-	if s.err != nil {
-		return s.err
+func (s *stubStore) load(string) (config.Config, error) { return s.cfg, s.loadErr }
+
+func (s *stubStore) save(_ string, cfg config.Config) error {
+	if s.saveErr != nil {
+		return s.saveErr
 	}
-	s.path, s.cfg = path, cfg
-	s.n++
+	s.saved = cfg
+	s.saveN++
 	return nil
 }
 
-func deps(t *testing.T, sec *fakeSecret, n *fakeNpmrc, saved *savedConfig) setup.Deps {
+func deps(t *testing.T, sec *fakeSecret, n *fakeNpmrc, store *stubStore) setup.Deps {
 	t.Helper()
 	return setup.Deps{
 		ConfigPath: filepath.Join(t.TempDir(), "config.toml"),
 		Secret:     sec,
 		Npmrc:      n,
-		SaveConfig: saved.save,
+		LoadConfig: store.load,
+		SaveConfig: store.save,
 		Log:        logger.Discard(),
 	}
 }
 
-func TestWritesTokenAndConfig(t *testing.T) {
-	sec := &fakeSecret{token: "npm_tok"}
+// `pnop setup -c private` with no other flags is a pure profile switch.
+func TestActivatesAnExistingConfig(t *testing.T) {
+	store := &stubStore{cfg: config.Config{
+		Active: "job",
+		Configs: map[string]config.Entry{
+			"job":     {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F", Registry: "registry.npmjs.org"},
+			"private": {File: "/tmp/.npmrc", Vault: "E", Item: "P", Field: "password", Registry: "registry.npmjs.org"},
+		},
+	}}
+	sec := &fakeSecret{token: "private_tok"}
 	n := &fakeNpmrc{}
-	saved := &savedConfig{}
-	d := deps(t, sec, n, saved)
 
-	err := setup.Run(t.Context(), d, config.Entry{
-		File: "/tmp/pnop-test/.npmrc", Vault: "MyVault", Item: "MyItem", Field: "tokenfield",
+	if err := setup.Run(t.Context(), deps(t, sec, n, store), "private", config.Entry{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if store.saved.Active != "private" {
+		t.Errorf("Active = %q, want private", store.saved.Active)
+	}
+	if sec.item != "P" {
+		t.Errorf("fetched item %q, want P", sec.item)
+	}
+	if n.token != "private_tok" {
+		t.Errorf("wrote token %q, want private_tok", n.token)
+	}
+}
+
+// Flags create the entry when it does not exist yet, then activate it.
+func TestCreatesThenActivates(t *testing.T) {
+	store := &stubStore{cfg: config.Config{}, loadErr: config.ErrNotConfigured}
+	sec := &fakeSecret{token: "tok"}
+
+	err := setup.Run(t.Context(), deps(t, sec, &fakeNpmrc{}, store), "job", config.Entry{
+		Vault: "V", Item: "I", Field: "F",
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if n.token != "npm_tok" {
-		t.Errorf("wrote token %q, want npm_tok", n.token)
+	if store.saved.Active != "job" {
+		t.Errorf("Active = %q, want job", store.saved.Active)
 	}
-	if n.path != "/tmp/pnop-test/.npmrc" {
-		t.Errorf("wrote to %q, want /tmp/pnop-test/.npmrc", n.path)
+	entry := store.saved.Configs["job"]
+	if entry.Vault != "V" || entry.Item != "I" || entry.Field != "F" {
+		t.Errorf("saved entry = %+v, want V/I/F", entry)
 	}
-	if n.registry != "registry.npmjs.org" {
-		t.Errorf("registry = %q, want the default", n.registry)
-	}
-	if saved.n != 1 || saved.path != d.ConfigPath {
-		t.Errorf("saved config %d times at %q, want 1 at %q", saved.n, saved.path, d.ConfigPath)
+	if entry.Registry != "registry.npmjs.org" {
+		t.Errorf("Registry = %q, want the default", entry.Registry)
 	}
 }
 
-func TestAppliesDefaults(t *testing.T) {
-	sec := &fakeSecret{token: "npm_tok"}
-	saved := &savedConfig{}
+// Activating a name that does not exist, with no flags to create it, must fail
+// before anything is written.
+func TestActivatingAnUnknownConfigFails(t *testing.T) {
+	store := &stubStore{cfg: config.Config{
+		Configs: map[string]config.Entry{"job": {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F"}},
+	}}
+	n := &fakeNpmrc{}
 
-	err := setup.Run(t.Context(), deps(t, sec, &fakeNpmrc{}, saved), config.Entry{
-		File: "/tmp/.npmrc", Vault: "MyVault", Item: "tok", Field: "tokenfield",
+	err := setup.Run(t.Context(), deps(t, &fakeSecret{token: "t"}, n, store), "nope", config.Entry{})
+
+	if err == nil {
+		t.Fatal("Run succeeded, want an error")
+	}
+	if store.saveN != 0 || n.writes != 0 {
+		t.Error("Run wrote something despite the config being unknown")
+	}
+}
+
+// Flags on an existing entry update it in place, leaving siblings alone.
+func TestUpdatesAnExistingConfig(t *testing.T) {
+	store := &stubStore{cfg: config.Config{
+		Active: "job",
+		Configs: map[string]config.Entry{
+			"job":     {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F", Registry: "registry.npmjs.org"},
+			"private": {File: "/tmp/.npmrc", Vault: "E", Item: "P", Field: "password", Registry: "registry.npmjs.org"},
+		},
+	}}
+
+	err := setup.Run(t.Context(), deps(t, &fakeSecret{token: "t"}, &fakeNpmrc{}, store), "job", config.Entry{
+		Vault: "V2", Item: "I2", Field: "F2",
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if sec.field != "tokenfield" {
-		t.Errorf("fetched field %q, want the field the caller asked for", sec.field)
+	if got := store.saved.Configs["job"].Vault; got != "V2" {
+		t.Errorf("job vault = %q, want V2", got)
 	}
-	if saved.cfg.Registry != "registry.npmjs.org" {
-		t.Errorf("saved registry %q, want the default", saved.cfg.Registry)
-	}
-}
-
-func TestExpandsTildeBeforeSaving(t *testing.T) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip("no home dir")
-	}
-	saved := &savedConfig{}
-
-	err = setup.Run(t.Context(), deps(t, &fakeSecret{token: "tok"}, &fakeNpmrc{}, saved), config.Entry{
-		File: "~/.npmrc.job", Vault: "MyVault", Item: "tok", Field: "tokenfield",
-	})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	want := filepath.Join(home, ".npmrc.job")
-	if saved.cfg.File != want {
-		t.Errorf("saved file = %q, want %q", saved.cfg.File, want)
-	}
-	if strings.Contains(saved.cfg.File, "~") {
-		t.Error("saved config still contains a tilde")
+	if got := store.saved.Configs["private"].Vault; got != "E" {
+		t.Errorf("private vault = %q, want it untouched", got)
 	}
 }
 
-// pnop makes no assumptions about the user's 1Password layout, so vault, item
-// and field must be supplied explicitly (unlike File, which has a default).
-func TestRequiresEveryItemCoordinate(t *testing.T) {
-	tests := []struct {
-		name string
-		cfg  config.Entry
-	}{
-		{"no vault", config.Entry{File: "/tmp/.npmrc", Item: "tok", Field: "tokenfield"}},
-		{"no item", config.Entry{File: "/tmp/.npmrc", Vault: "MyVault", Field: "tokenfield"}},
-		{"no field", config.Entry{File: "/tmp/.npmrc", Vault: "MyVault", Item: "tok"}},
-	}
+func TestRequiresAConfigName(t *testing.T) {
+	store := &stubStore{}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			saved := &savedConfig{}
-			n := &fakeNpmrc{}
-
-			if err := setup.Run(t.Context(), deps(t, &fakeSecret{token: "t"}, n, saved), tt.cfg); err == nil {
-				t.Fatal("Run succeeded, want a validation error")
-			}
-			if n.writes != 0 || saved.n != 0 {
-				t.Error("Run wrote something despite failing validation")
-			}
-		})
+	if err := setup.Run(t.Context(), deps(t, &fakeSecret{}, &fakeNpmrc{}, store), "", config.Entry{}); err == nil {
+		t.Error("Run succeeded with no -c, want an error")
 	}
 }
 
 func TestDoesNotSaveConfigWhenFetchFails(t *testing.T) {
+	store := &stubStore{cfg: config.Config{}, loadErr: config.ErrNotConfigured}
 	sec := &fakeSecret{err: errors.New("op: not signed in")}
-	saved := &savedConfig{}
 	n := &fakeNpmrc{}
 
-	err := setup.Run(t.Context(), deps(t, sec, n, saved), config.Entry{
-		File: "/tmp/.npmrc", Vault: "MyVault", Item: "tok", Field: "tokenfield",
-	})
+	err := setup.Run(t.Context(), deps(t, sec, n, store), "job", config.Entry{Vault: "V", Item: "I", Field: "F"})
 
 	if err == nil {
 		t.Fatal("Run succeeded, want the 1Password error")
 	}
-	if saved.n != 0 {
+	if store.saveN != 0 {
 		t.Error("saved a config pointing at an item it could not read")
 	}
 	if n.writes != 0 {
@@ -189,17 +196,17 @@ func TestDoesNotSaveConfigWhenFetchFails(t *testing.T) {
 }
 
 func TestDoesNotSaveConfigWhenNpmrcWriteFails(t *testing.T) {
-	saved := &savedConfig{}
+	store := &stubStore{cfg: config.Config{}, loadErr: config.ErrNotConfigured}
 	n := &fakeNpmrc{writeErr: errors.New("permission denied")}
 
-	err := setup.Run(t.Context(), deps(t, &fakeSecret{token: "tok"}, n, saved), config.Entry{
-		File: "/tmp/.npmrc", Vault: "MyVault", Item: "tok", Field: "tokenfield",
+	err := setup.Run(t.Context(), deps(t, &fakeSecret{token: "tok"}, n, store), "job", config.Entry{
+		Vault: "V", Item: "I", Field: "F",
 	})
 
 	if err == nil {
 		t.Fatal("Run succeeded, want the write error")
 	}
-	if saved.n != 0 {
+	if store.saveN != 0 {
 		t.Error("saved a config despite the npmrc write failing")
 	}
 }
