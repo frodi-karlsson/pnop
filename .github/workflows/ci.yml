@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+# Third-party code is pinned by digest rather than by tag, so a retagged
+# release cannot silently change what runs here. Trailing comments record the
+# human-readable version each digest corresponds to.
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Download Go dependencies
+        run: go mod download
+
+      - name: Install golangci-lint
+        env:
+          GOLANGCI_VERSION: v2.13.2
+          # sha256 of install.sh at the tag above. Verified before the script
+          # is executed; the script in turn verifies the release tarball
+          # against golangci-lint's own published checksums.
+          INSTALL_SH_SHA256: 1022ddb4d87ed252350ed03fc9677e250a4ae95cc6bcd4658c2a20a8a23d390f
+        run: |
+          set -euo pipefail
+          curl -sSfL -o install-golangci-lint.sh \
+            "https://raw.githubusercontent.com/golangci/golangci-lint/${GOLANGCI_VERSION}/install.sh"
+          echo "${INSTALL_SH_SHA256}  install-golangci-lint.sh" | sha256sum -c -
+          sh install-golangci-lint.sh -b "$(go env GOPATH)/bin" "${GOLANGCI_VERSION}"
+          rm install-golangci-lint.sh
+
+      - name: Run check
+        run: make check
