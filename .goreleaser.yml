@@ -38,14 +38,26 @@ release:
   draft: true
   prerelease: auto
 
-brews:
+homebrew_casks:
   - name: pni
+    binaries:
+      - pni
     repository:
       owner: frodi-karlsson
       name: homebrew-tap
+      # Pushing to another repo needs more than the workflow's GITHUB_TOKEN.
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     commit_author:
       name: goreleaserbot
       email: goreleaser@carlosbecker.com
     homepage: "https://github.com/frodi-karlsson/pni"
     description: "pnpm install with automatic npm token recovery from 1Password"
     license: "MIT"
+    hooks:
+      post:
+        # The binary is unsigned, so macOS quarantines it on download and
+        # Gatekeeper refuses to run it. Strip the attribute on install.
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/pni"]
+          end

@@ -5,7 +5,7 @@
 ## Install
 
 ```sh
-brew install frodi-karlsson/tap/pni
+brew install --cask frodi-karlsson/tap/pni
 ```
 
 ## Setup
