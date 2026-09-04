@@ -53,7 +53,7 @@ homebrew_casks:
       name: goreleaserbot
       email: goreleaser@carlosbecker.com
     homepage: "https://github.com/frodi-karlsson/pnop"
-    description: "pnpm install with automatic npm token recovery from 1Password"
+    description: "pnpm with automatic npm token recovery from 1Password"
     license: "MIT"
     hooks:
       post:
