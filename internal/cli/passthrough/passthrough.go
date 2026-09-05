@@ -54,6 +54,14 @@ func Run(ctx context.Context, d Deps, args []string) error {
 		return cli.Exit(code)
 	}
 
+	if !touchesRegistry(args) {
+		// A local-only command such as `test` or `run` never contacted the
+		// registry, so its failure cannot be a stale token. Staying silent
+		// here is the difference between a failing test suite being quiet and
+		// it raising a 1Password prompt.
+		return cli.Exit(code)
+	}
+
 	d.Log.Infof("%s failed (exit %d) - checking the npm token...", PackageManager, code)
 
 	entry, err := d.LoadEntry()

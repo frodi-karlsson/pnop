@@ -6,7 +6,9 @@
 
 Every command goes straight to pnpm. If it succeeds, pnop does nothing at all.
 
-If it fails, pnop compares the npm token in your `.npmrc` against the one in 1Password:
+If it fails, pnop first asks whether the command could even have been talking to the registry. Local-only commands such as `test`, `run`, `exec`, `ls` and `why` are left completely alone, so a failing test suite never reaches for your vault. Anything else, including commands pnop does not recognise, is treated as registry touching.
+
+For those, pnop compares the npm token in your `.npmrc` against the one in 1Password:
 
 | Token on disk | What pnop does |
 | - | - |
