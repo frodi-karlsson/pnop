@@ -6,17 +6,53 @@ import (
 	"github.com/frodi-karlsson/pnop/internal/authfail"
 )
 
+// Real output captured from each pnpm major with a stale token against a
+// private package. The wording differs enough between versions that this is
+// the regression test that matters: pnpm 12's tarball shape was missed
+// entirely by the pnpm 11 patterns.
 func TestDetectsRealPnpmAuthFailures(t *testing.T) {
-	// Captured verbatim from pnpm 11 with a stale token against a private
-	// package. Note it is a 404, not a 401.
-	const stale = `[ERR_PNPM_FETCH_404] GET https://registry.npmjs.org/@scope%2Fpkg: Not Found - 404
+	tests := []struct {
+		name   string
+		output string
+	}{
+		{
+			// pnpm 11.23.0, metadata fetch. Note it is a 404, not a 401.
+			name: "pnpm 11 metadata",
+			output: `[ERR_PNPM_FETCH_404] GET https://registry.npmjs.org/@scope%2Fpkg: Not Found - 404
 
 @scope/pkg is not in the npm registry, or you have no permission to fetch it.
 
-An authorization header was used: Bearer npm_[hidden]`
+An authorization header was used: Bearer npm_[hidden]`,
+		},
+		{
+			// pnpm 12.3.4, metadata fetch: boxed, and the help text carries
+			// the authorization line.
+			name: "pnpm 12 metadata",
+			output: `Error: ERR_PNPM_FETCH_404
+  × updating dependencies
+  ╰─▶ Failed to resolve dependency tree: GET https://registry.npmjs.org/
+      @scope%2Fpkg: Not Found - 404
+  help: @scope/pkg is not in the npm registry, or you have no
+        permission to fetch it.
+        An authorization header was used: Bearer npm_[hidden]`,
+		},
+		{
+			// pnpm 12.3.4, tarball fetch on a cold store. Different code, and
+			// no authorization line at all, so nothing else here matches.
+			name: "pnpm 12 tarball",
+			output: `Error: ERR_PNPM_TARBALL_HTTP_STATUS
+  × installing dependencies
+  ╰─▶ Tarball server returned HTTP 404 for https://registry.npmjs.org/
+      @scope/pkg/-/pkg-7.771.0.tgz`,
+		},
+	}
 
-	if !authfail.Detected(stale) {
-		t.Error("did not detect a real stale-token failure")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !authfail.Detected(tt.output) {
+				t.Error("did not detect a real stale-token failure")
+			}
+		})
 	}
 }
 
