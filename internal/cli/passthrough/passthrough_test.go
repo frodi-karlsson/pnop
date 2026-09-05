@@ -10,6 +10,7 @@ import (
 	"github.com/frodi-karlsson/pnop/internal/cli/passthrough"
 	"github.com/frodi-karlsson/pnop/internal/config"
 	"github.com/frodi-karlsson/pnop/internal/logger"
+	"github.com/frodi-karlsson/pnop/internal/runner"
 )
 
 const (
@@ -17,22 +18,38 @@ const (
 	freshToken = "fresh-token"
 )
 
+// authFailureOutput is what pnpm actually prints when the token is stale,
+// abbreviated. Tests that exercise recovery need it, because pnop now decides
+// from the output rather than from the command line.
+const authFailureOutput = "[ERR_PNPM_FETCH_404] GET https://registry.npmjs.org/@scope%2Fpkg: Not Found - 404\n" +
+	"An authorization header was used: Bearer npm_[hidden]"
+
 // fakeRunner records every invocation and replays a scripted list of results.
+// Output defaults to an auth failure, so a test only has to say otherwise when
+// it cares about the non-auth path.
 type fakeRunner struct {
-	codes []int
-	err   error
-	calls [][]string
+	codes   []int
+	outputs []string
+	err     error
+	calls   [][]string
 }
 
-func (f *fakeRunner) Run(_ context.Context, name string, args ...string) (int, error) {
+func (f *fakeRunner) Run(_ context.Context, name string, args ...string) (runner.Result, error) {
 	f.calls = append(f.calls, append([]string{name}, args...))
 	if f.err != nil {
-		return 0, f.err
+		return runner.Result{}, f.err
 	}
-	if len(f.calls) > len(f.codes) {
-		return 0, nil
+
+	i := len(f.calls) - 1
+	if i >= len(f.codes) {
+		return runner.Result{Code: 0}, nil
 	}
-	return f.codes[len(f.calls)-1], nil
+
+	out := authFailureOutput
+	if i < len(f.outputs) {
+		out = f.outputs[i]
+	}
+	return runner.Result{Code: f.codes[i], Output: out}, nil
 }
 
 func (f *fakeRunner) Output(_ context.Context, _ string, _ ...string) (string, int, error) {

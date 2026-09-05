@@ -6,9 +6,11 @@
 
 Every command goes straight to pnpm. If it succeeds, pnop does nothing at all.
 
-If it fails, pnop first asks whether the command could even have been talking to the registry. Local-only commands such as `test`, `run`, `exec`, `ls` and `why` are left completely alone, so a failing test suite never reaches for your vault. Anything else, including commands pnop does not recognise, is treated as registry touching.
+If it fails, pnop reads what pnpm printed. Unless pnpm reported a registry authentication problem, pnop stays out of the way completely, so a failing test suite, a type error or a missing script never reaches for your vault.
 
-For those, pnop compares the npm token in your `.npmrc` against the one in 1Password:
+This is decided from the output rather than from the command, because the command cannot tell you. pnpm runs any package.json script as a bare subcommand, so `pnpm typecheck` and `pnpm upd` look identical from the outside even though one runs a compiler and the other runs `pnpm update`. Reading the output also means a registry failure is caught inside a script that wraps pnpm, which no amount of inspecting the arguments would find.
+
+When pnpm did report an auth problem, pnop compares the npm token in your `.npmrc` against the one in 1Password:
 
 | Token on disk | What pnop does |
 | - | - |

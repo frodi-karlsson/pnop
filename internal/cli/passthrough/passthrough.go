@@ -4,6 +4,7 @@ package passthrough
 import (
 	"context"
 
+	"github.com/frodi-karlsson/pnop/internal/authfail"
 	"github.com/frodi-karlsson/pnop/internal/cli"
 	"github.com/frodi-karlsson/pnop/internal/config"
 	"github.com/frodi-karlsson/pnop/internal/logger"
@@ -40,13 +41,14 @@ type Deps struct {
 // happens when the token actually changed, which means the first attempt was
 // rejected by the registry and cannot have had a side effect.
 func Run(ctx context.Context, d Deps, args []string) error {
-	code, err := d.Runner.Run(ctx, PackageManager, args...)
+	res, err := d.Runner.Run(ctx, PackageManager, args...)
 	if err != nil {
 		return err
 	}
-	if code == 0 {
+	if res.Code == 0 {
 		return nil
 	}
+	code := res.Code
 
 	if runner.Signalled(code) {
 		// The child was killed rather than rejected; credentials are not the
@@ -54,15 +56,14 @@ func Run(ctx context.Context, d Deps, args []string) error {
 		return cli.Exit(code)
 	}
 
-	if !touchesRegistry(args) {
-		// A local-only command such as `test` or `run` never contacted the
-		// registry, so its failure cannot be a stale token. Staying silent
-		// here is the difference between a failing test suite being quiet and
-		// it raising a 1Password prompt.
+	if !authfail.Detected(res.Output) {
+		// pnpm did not report an authentication problem, so the token cannot
+		// be the cause. Staying silent here is the difference between a
+		// failing test suite being quiet and it raising a 1Password prompt.
 		return cli.Exit(code)
 	}
 
-	d.Log.Infof("%s failed (exit %d) - checking the npm token...", PackageManager, code)
+	d.Log.Infof("%s failed on registry auth (exit %d) - checking the npm token...", PackageManager, code)
 
 	entry, err := d.LoadEntry()
 	if err != nil {
@@ -82,11 +83,11 @@ func Run(ctx context.Context, d Deps, args []string) error {
 
 	d.Log.Infof("token was stale, updated %s - retrying...", entry.File)
 
-	retryCode, err := d.Runner.Run(ctx, PackageManager, args...)
+	retry, err := d.Runner.Run(ctx, PackageManager, args...)
 	if err != nil {
 		return err
 	}
-	return cli.Exit(retryCode)
+	return cli.Exit(retry.Code)
 }
 
 // refreshToken reports whether the managed npmrc was actually changed.
