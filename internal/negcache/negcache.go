@@ -1,4 +1,4 @@
-// Package negcache bounds 1Password reads that have already proved fruitless.
+// Package negcache bounds token-command runs that have already proved fruitless.
 package negcache
 
 import (
@@ -14,12 +14,12 @@ import (
 	"time"
 )
 
-// TTL is how long an entry suppresses another vault read.
+// TTL is how long an entry suppresses another run of the token command.
 const TTL = 10 * time.Minute
 
 const fileMode fs.FileMode = 0o600
 
-// Reason is why a vault read did not help.
+// Reason is why running the token command did not help.
 type Reason string
 
 const (
@@ -46,7 +46,7 @@ func (e Entry) Describe() string {
 	return fmt.Sprintf("the vault's token could not be checked %d %s ago", mins, unit)
 }
 
-// Cache records and looks up fruitless vault reads.
+// Cache records and looks up token-command runs that did not help.
 type Cache interface {
 	Lookup(config, token string) (Entry, bool)
 	Record(config, token string, reason Reason) error

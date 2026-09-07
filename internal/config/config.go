@@ -1,5 +1,5 @@
-// Package config persists which npmrc file pnop manages and where the token
-// lives in 1Password.
+// Package config persists which npmrc file pnop manages and the command that
+// prints the token for it.
 package config
 
 import (
@@ -30,7 +30,7 @@ type Entry struct {
 	// File is the npmrc pnop keeps in sync. pnpm reads ~/.npmrc.
 	File string `toml:"file"`
 	// Command prints the token on stdout. Any command will do, which is why
-	// pnop needs to know nothing about how a vault is arranged.
+	// pnop needs to know nothing about where a token is kept.
 	Command string `toml:"command"`
 	// Vault, Item and Field are the 1Password coordinates pnop used before it
 	// took a command. They are read so an old config still works, and dropped
@@ -50,7 +50,7 @@ type Entry struct {
 
 // ErrNotConfigured is returned by Load when `pnop +setup` has never been run.
 var ErrNotConfigured = errors.New(
-	"pnop is not configured yet - run: pnop +setup -c <name> --vault=<vault> --item=<item> --field=<field>")
+	"pnop is not configured yet - run: pnop +setup -c <name> --command '<command that prints a token>'")
 
 // Config is the whole on-disk document: a set of named entries plus a pointer
 // to the one in force.

@@ -193,7 +193,7 @@ func lookup(d Deps, name, token string) (negcache.Entry, bool) {
 	return d.Cache.Lookup(name, token)
 }
 
-// record stores a fruitless vault read. Failing to do so only costs a prompt.
+// record stores a run that did not help. Failing to do so only costs a prompt.
 func record(d Deps, name, token string, reason negcache.Reason) {
 	if d.Cache == nil {
 		return

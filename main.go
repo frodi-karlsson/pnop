@@ -1,5 +1,5 @@
-// Command pnop wraps pnpm and transparently recovers from an npm auth token
-// that has gone stale, refreshing it from 1Password and rerunning the command.
+// Command pnop wraps pnpm and recovers from an npm auth token the registry no
+// longer accepts, refreshing it with a command the user configured.
 package main
 
 import (
@@ -37,8 +37,8 @@ func newRoot() *cobra.Command {
 		Use:   "pnop [pnpm args...]",
 		Short: "pnpm, with automatic npm token recovery",
 		Long: "pnop forwards every command to pnpm. If a command fails, it asks the\n" +
-			"registry whether your npm token is still accepted, and refreshes it from\n" +
-			"1Password when it is not.\n\n" +
+			"registry whether your npm token is still accepted, and when it is not,\n" +
+			"refreshes it by running a command you configured.\n\n" +
 			"pnop's own commands carry a `+`: +setup, +refresh, +version, +help.\n" +
 			"Anything without it is pnpm's, including `setup`, `help` and `--version`,\n" +
 			"which pnpm defines itself.",
@@ -128,7 +128,7 @@ func passthroughDeps() passthrough.Deps {
 
 // probeCache locates the negative cache, or returns nil when the platform will
 // not say where per-user cache files belong. A missing cache costs repeated
-// 1Password reads on a failing registry, which is not worth refusing to run over.
+// token-command runs on a failing registry, which is not worth refusing to run over.
 func probeCache(log logger.Logger) negcache.Cache {
 	dir, err := negcache.Default()
 	if err != nil {
