@@ -128,7 +128,7 @@ func passthroughDeps() passthrough.Deps {
 
 // probeCache locates the negative cache, or returns nil when the platform will
 // not say where per-user cache files belong. A missing cache costs repeated
-// 1Password reads on a failing registry; it is not worth refusing to run over.
+// 1Password reads on a failing registry, which is not worth refusing to run over.
 func probeCache(log logger.Logger) negcache.Cache {
 	dir, err := negcache.Default()
 	if err != nil {

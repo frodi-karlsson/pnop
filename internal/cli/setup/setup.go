@@ -37,7 +37,7 @@ func Command(load func() (Deps, error)) *cobra.Command {
 		Use:   "+setup -c <name>",
 		Short: "Switch to a credential config, creating it if flags are given",
 		Long: "Activate a named credential config and write its token to the npmrc it\n" +
-			"manages. With no flags it is a pure profile switch; passing any flag\n" +
+			"manages. With no flags it is a pure profile switch. Passing any flag\n" +
 			"replaces a config of the same name outright, so a field you leave out\n" +
 			"returns to its default. With --remove the config is deleted instead,\n" +
 			"leaving the npmrc alone.\n\n" +
@@ -202,7 +202,7 @@ func Remove(d Deps, name string, flags config.Entry) error {
 }
 
 // resolveEntry returns the entry to activate. With no flags that is the stored
-// one; with any flag it is the flags themselves, so an omitted optional field
+// one. With any flag it is the flags themselves, so an omitted optional field
 // returns to its default instead of keeping an older value. Merging would make
 // a field impossible to clear, and would hide a half-typed command as a
 // working one.

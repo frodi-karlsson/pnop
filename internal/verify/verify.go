@@ -94,7 +94,7 @@ func (h HTTP) Identify(ctx context.Context, registry, token string) (string, Out
 
 	switch resp.StatusCode {
 	case http.StatusOK:
-		// The status is the answer; an unreadable body costs only the name.
+		// The status is the answer. An unreadable body costs only the name.
 		return username(resp.Body), Valid
 	case http.StatusUnauthorized:
 		return "", Rejected

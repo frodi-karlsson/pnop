@@ -18,7 +18,7 @@ func server(t *testing.T, handler http.HandlerFunc) (verify.HTTP, string) {
 	return verify.HTTP{Client: srv.Client()}, strings.TrimPrefix(srv.URL, "https://")
 }
 
-// Only 401 is evidence against a token; GitHub Packages answers 404 to whoami
+// Only 401 is evidence against a token. GitHub Packages answers 404 to whoami
 // and an outage answers 5xx, neither of which is about the credential.
 func TestStatusDecidesTheOutcome(t *testing.T) {
 	tests := []struct {
@@ -96,7 +96,7 @@ func TestProbeHitsWhoamiWithABearerToken(t *testing.T) {
 	}
 }
 
-// Callers skip the probe without a token; this is the backstop.
+// Callers skip the probe without a token. This is the backstop.
 func TestNoTokenMeansNoAuthorizationHeader(t *testing.T) {
 	var auth string
 	v, host := server(t, func(w http.ResponseWriter, r *http.Request) {

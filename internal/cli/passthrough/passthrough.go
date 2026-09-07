@@ -23,7 +23,7 @@ import (
 const PackageManager = "pnpm"
 
 // Environment pnop reads. BinEnv names the real pnpm for a PATH shim that
-// would otherwise resolve back to itself; MarkerEnv is a path a wrapper owns,
+// would otherwise resolve back to itself. MarkerEnv is a path a wrapper owns,
 // never one pnop picks, since a fixed path is shared between shells.
 const (
 	BinEnv     = "PNOP_PNPM"
@@ -91,7 +91,7 @@ func Run(ctx context.Context, d Deps, args []string) error {
 
 	if cached, ok := lookup(d, name, disk); ok {
 		// Naming pnpm's failure keeps this from reading as a diagnosis of it.
-		d.Log.Infof("%s failed above; pnop did not refresh - %s", PackageManager, cached.Describe())
+		d.Log.Infof("%s failed above, and pnop did not refresh - %s", PackageManager, cached.Describe())
 		return cli.Exit(code)
 	}
 
@@ -193,7 +193,7 @@ func lookup(d Deps, name, token string) (negcache.Entry, bool) {
 	return d.Cache.Lookup(name, token)
 }
 
-// record stores a fruitless vault read; failing to do so only costs a prompt.
+// record stores a fruitless vault read. Failing to do so only costs a prompt.
 func record(d Deps, name, token string, reason negcache.Reason) {
 	if d.Cache == nil {
 		return

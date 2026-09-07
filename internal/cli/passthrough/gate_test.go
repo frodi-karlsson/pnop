@@ -102,7 +102,7 @@ func TestRejectedVaultTokenIsNotWritten(t *testing.T) {
 func TestUncheckableVaultTokenFallsBackToComparison(t *testing.T) {
 	t.Run("identical to disk", func(t *testing.T) {
 		h := newHarness([]int{17}, staleToken, map[string]verify.Outcome{
-			staleToken: verify.Rejected, // the disk probe answered; the vault probe did not
+			staleToken: verify.Rejected, // the disk probe answered, the vault probe did not
 		})
 		h.secret.token = staleToken
 		// Same token, different answer the second time: drive it by call order.
