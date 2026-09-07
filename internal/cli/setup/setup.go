@@ -4,6 +4,7 @@ package setup
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/frodi-karlsson/pnop/internal/config"
 	"github.com/frodi-karlsson/pnop/internal/logger"
@@ -36,9 +37,11 @@ func Command(load func() (Deps, error)) *cobra.Command {
 		Use:   "+setup -c <name>",
 		Short: "Switch to a credential config, creating it if flags are given",
 		Long: "Activate a named credential config and write its token to the npmrc it\n" +
-			"manages. With --vault/--item/--field the config is created or updated\n" +
-			"first. Later pnop commands need no flags. With --remove the config is\n" +
-			"deleted instead, leaving the npmrc alone.\n\n" +
+			"manages. With no flags it is a pure profile switch.\n\n" +
+			"Any flag defines the config outright: what you pass is the whole entry,\n" +
+			"and what you leave out goes back to its default rather than to whatever\n" +
+			"was there before. That is how an optional field is cleared. With --remove\n" +
+			"the config is deleted instead, leaving the npmrc alone.\n\n" +
 			"The `+` is what separates pnop's commands from pnpm's, which has a\n" +
 			"`setup` of its own.",
 		Args:         cobra.NoArgs,
@@ -61,6 +64,7 @@ func Command(load func() (Deps, error)) *cobra.Command {
 	cmd.Flags().StringVar(&entry.Item, "item", "", "1Password item holding the token")
 	cmd.Flags().StringVar(&entry.Field, "field", "", "field on the item holding the token")
 	cmd.Flags().StringVar(&entry.Registry, "registry", "", "registry whose _authToken is managed")
+	cmd.Flags().BoolVar(&entry.Rerun, "rerun", false, "rerun a failed command once after refreshing its token")
 	cmd.Flags().BoolVar(&remove, "remove", false, "delete the named config instead of activating it")
 
 	return cmd
@@ -198,34 +202,25 @@ func Remove(d Deps, name string, flags config.Entry) error {
 	return nil
 }
 
-// resolveEntry merges any supplied flags over the stored entry, or builds a
-// new one. An unknown name with no flags is an error rather than an empty
-// config.
+// resolveEntry returns the entry to activate. With no flags that is the stored
+// one; with any flag it is the flags themselves, so an omitted optional field
+// returns to its default instead of keeping an older value. Merging would make
+// a field impossible to clear, and would hide a half-typed command as a
+// working one.
 func resolveEntry(cfg config.Config, name string, flags config.Entry) (config.Entry, error) {
 	entry, known := cfg.Configs[name]
-	if !known && flags == (config.Entry{}) {
-		return config.Entry{}, &config.UnknownConfigError{Name: name, Known: cfg.Names()}
-	}
-
-	if flags.File != "" {
-		entry.File = flags.File
-	}
-	if flags.Vault != "" {
-		entry.Vault = flags.Vault
-	}
-	if flags.Item != "" {
-		entry.Item = flags.Item
-	}
-	if flags.Field != "" {
-		entry.Field = flags.Field
-	}
-	if flags.Registry != "" {
-		entry.Registry = flags.Registry
+	if flags == (config.Entry{}) {
+		if !known {
+			return config.Entry{}, &config.UnknownConfigError{Name: name, Known: cfg.Names()}
+		}
+	} else {
+		entry = flags
 	}
 
 	entry = entry.WithDefaults()
 	if err := entry.Validate(); err != nil {
-		return config.Entry{}, err
+		return config.Entry{}, fmt.Errorf(
+			"%w - pnop +setup defines the whole config, so pass --vault, --item and --field together", err)
 	}
 
 	// Store the resolved path: a "~" recorded in config would have to be

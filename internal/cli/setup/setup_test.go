@@ -19,10 +19,12 @@ type fakeSecret struct {
 	vault string
 	item  string
 	field string
+	calls int
 }
 
 func (f *fakeSecret) Fetch(_ context.Context, vault, item, field string) (string, error) {
 	f.vault, f.item, f.field = vault, item, field
+	f.calls++
 	return f.token, f.err
 }
 
@@ -175,7 +177,7 @@ func TestActivatingAnUnknownConfigFails(t *testing.T) {
 }
 
 // Flags on an existing entry update it in place, leaving siblings alone.
-func TestUpdatesAnExistingConfig(t *testing.T) {
+func TestFlagsReplaceTheWholeConfig(t *testing.T) {
 	store := &stubStore{cfg: config.Config{
 		Active: "job",
 		Configs: map[string]config.Entry{
@@ -184,18 +186,80 @@ func TestUpdatesAnExistingConfig(t *testing.T) {
 		},
 	}}
 
-	err := setup.Run(t.Context(), deps(t, &fakeSecret{token: "t"}, &fakeNpmrc{}, store), "job", config.Entry{
-		Vault: "V2", Item: "I2", Field: "F2",
+	err := setup.Run(t.Context(), deps(t, &fakeSecret{token: "t"}, agreeing(), store), "job", config.Entry{
+		Vault: "V2", Item: "I2", Field: "F2", File: "/tmp/.npmrc",
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if got := store.saved.Configs["job"].Vault; got != "V2" {
-		t.Errorf("job vault = %q, want V2", got)
+	// The omitted registry returns to its default rather than keeping the
+	// stored one: that is how an optional field is cleared.
+	want := config.Entry{File: "/tmp/.npmrc", Vault: "V2", Item: "I2", Field: "F2", Registry: "registry.npmjs.org"}
+	if got := store.saved.Configs["job"]; got != want {
+		t.Errorf("job = %+v, want %+v", got, want)
 	}
 	if got := store.saved.Configs["private"].Vault; got != "E" {
 		t.Errorf("private vault = %q, want it untouched", got)
+	}
+}
+
+// Replacing means a half-typed command cannot quietly inherit the rest of an
+// old config, so it fails before anything is fetched or written.
+func TestPartialFlagsAreRefused(t *testing.T) {
+	store := &stubStore{cfg: config.Config{
+		Active:  "job",
+		Configs: map[string]config.Entry{"job": {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F"}},
+	}}
+	sec := &fakeSecret{token: "t"}
+	n := agreeing()
+
+	err := setup.Run(t.Context(), deps(t, sec, n, store), "job", config.Entry{Field: "F2"})
+
+	if err == nil {
+		t.Fatal("Run succeeded, want an error naming what is missing")
+	}
+	if !strings.Contains(err.Error(), "vault is required") || !strings.Contains(err.Error(), "whole config") {
+		t.Errorf("err = %v, want it to name the missing field and explain replacement", err)
+	}
+	if sec.calls != 0 || n.writes != 0 || store.saveN != 0 {
+		t.Errorf("fetched %d, wrote %d, saved %d - want nothing to happen", sec.calls, n.writes, store.saveN)
+	}
+}
+
+// An optional field the flags cannot express must not survive a replacement.
+func TestReplacingClearsTheRerunOptIn(t *testing.T) {
+	store := &stubStore{cfg: config.Config{
+		Active: "job",
+		Configs: map[string]config.Entry{
+			"job": {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F", Registry: "registry.npmjs.org", Rerun: true},
+		},
+	}}
+
+	err := setup.Run(t.Context(), deps(t, &fakeSecret{token: "t"}, agreeing(), store), "job", config.Entry{
+		File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F",
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if store.saved.Configs["job"].Rerun {
+		t.Error("rerun survived a replacement, want it cleared like any omitted field")
+	}
+}
+
+// A pure switch keeps everything, including what the flags cannot express.
+func TestSwitchingKeepsTheStoredEntry(t *testing.T) {
+	stored := config.Entry{File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F", Registry: "npm.pkg.github.com", Rerun: true}
+	store := &stubStore{cfg: config.Config{Active: "other", Configs: map[string]config.Entry{"job": stored}}}
+
+	err := setup.Run(t.Context(), deps(t, &fakeSecret{token: "t"}, &fakeNpmrc{named: "npm.pkg.github.com"}, store), "job", config.Entry{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if got := store.saved.Configs["job"]; got != stored {
+		t.Errorf("job = %+v, want it untouched %+v", got, stored)
 	}
 }
 
