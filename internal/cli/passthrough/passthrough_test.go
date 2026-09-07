@@ -10,46 +10,40 @@ import (
 	"github.com/frodi-karlsson/pnop/internal/cli/passthrough"
 	"github.com/frodi-karlsson/pnop/internal/config"
 	"github.com/frodi-karlsson/pnop/internal/logger"
+	"github.com/frodi-karlsson/pnop/internal/negcache"
 	"github.com/frodi-karlsson/pnop/internal/runner"
+	"github.com/frodi-karlsson/pnop/internal/verify"
 )
 
 const (
 	staleToken = "stale-token"
 	freshToken = "fresh-token"
+	configName = "work"
 )
 
-// authFailureOutput is what pnpm actually prints when the token is stale,
-// abbreviated. Tests that exercise recovery need it, because pnop now decides
-// from the output rather than from the command line.
-const authFailureOutput = "[ERR_PNPM_FETCH_404] GET https://registry.npmjs.org/@scope%2Fpkg: Not Found - 404\n" +
-	"An authorization header was used: Bearer npm_[hidden]"
-
-// fakeRunner records every invocation and replays a scripted list of results.
-// Output defaults to an auth failure, so a test only has to say otherwise when
-// it cares about the non-auth path.
+// fakeRunner replays scripted exit codes and records each call's extra env.
 type fakeRunner struct {
-	codes   []int
-	outputs []string
-	err     error
-	calls   [][]string
+	codes []int
+	err   error
+	calls [][]string
+	envs  [][]string
 }
 
-func (f *fakeRunner) Run(_ context.Context, name string, args ...string) (runner.Result, error) {
+func (f *fakeRunner) Run(ctx context.Context, name string, args ...string) (runner.Result, error) {
+	return f.RunEnv(ctx, nil, name, args...)
+}
+
+func (f *fakeRunner) RunEnv(_ context.Context, extraEnv []string, name string, args ...string) (runner.Result, error) {
 	f.calls = append(f.calls, append([]string{name}, args...))
+	f.envs = append(f.envs, extraEnv)
 	if f.err != nil {
 		return runner.Result{}, f.err
 	}
-
 	i := len(f.calls) - 1
 	if i >= len(f.codes) {
 		return runner.Result{Code: 0}, nil
 	}
-
-	out := authFailureOutput
-	if i < len(f.outputs) {
-		out = f.outputs[i]
-	}
-	return runner.Result{Code: f.codes[i], Output: out}, nil
+	return runner.Result{Code: f.codes[i]}, nil
 }
 
 func (f *fakeRunner) Output(_ context.Context, _ string, _ ...string) (string, int, error) {
@@ -70,6 +64,7 @@ func (f *fakeSecret) Fetch(_ context.Context, _, _, _ string) (string, error) {
 // fakeNpmrc holds the token in memory rather than on disk.
 type fakeNpmrc struct {
 	token     string
+	registry  string
 	readErr   error
 	writeErr  error
 	writes    []string
@@ -90,37 +85,129 @@ func (f *fakeNpmrc) WriteToken(_, _, token string) error {
 	return nil
 }
 
-func deps(r *fakeRunner, s *fakeSecret, n *fakeNpmrc, log logger.Logger) passthrough.Deps {
-	return passthrough.Deps{
-		LoadEntry: func() (config.Entry, error) {
-			return config.Entry{
-				File: "/tmp/.npmrc", Vault: "MyVault", Item: "MyItem", Field: "tokenfield",
-			}.WithDefaults(), nil
-		},
-		Secret: s,
-		Npmrc:  n,
-		Runner: r,
-		Log:    log,
+func (f *fakeNpmrc) ReadRegistry(_ string) (string, error) {
+	return f.registry, nil
+}
+
+// fakeVerifier answers per token, or by call order when the same token has to
+// be answered differently twice. Statuses map to outcomes in verify's own tests.
+type fakeVerifier struct {
+	outcomes   map[string]verify.Outcome
+	byCall     []verify.Outcome
+	tokens     []string
+	registries []string
+}
+
+func (f *fakeVerifier) Verify(_ context.Context, registry, token string) verify.Outcome {
+	i := len(f.tokens)
+	f.tokens = append(f.tokens, token)
+	f.registries = append(f.registries, registry)
+	if i < len(f.byCall) {
+		return f.byCall[i]
+	}
+	if outcome, ok := f.outcomes[token]; ok {
+		return outcome
+	}
+	return verify.Inconclusive
+}
+
+func (f *fakeVerifier) calls() int { return len(f.tokens) }
+
+type fakeCache struct {
+	entry    negcache.Entry
+	hit      bool
+	recorded []negcache.Reason
+	keys     []string
+	err      error
+}
+
+func (f *fakeCache) Lookup(cfg, token string) (negcache.Entry, bool) {
+	f.keys = append(f.keys, cfg+"/"+token)
+	return f.entry, f.hit
+}
+
+func (f *fakeCache) Record(cfg, token string, reason negcache.Reason) error {
+	f.keys = append(f.keys, cfg+"/"+token)
+	f.recorded = append(f.recorded, reason)
+	return f.err
+}
+
+// harness collects the fakes so a test can assert on any of them after Run.
+type harness struct {
+	runner   *fakeRunner
+	secret   *fakeSecret
+	npmrc    *fakeNpmrc
+	verifier *fakeVerifier
+	cache    *fakeCache
+	env      map[string]string
+	markers  []string
+	log      strings.Builder
+	entry    config.Entry
+	loaded   bool
+}
+
+func newHarness(codes []int, disk string, outcomes map[string]verify.Outcome) *harness {
+	return &harness{
+		runner:   &fakeRunner{codes: codes},
+		secret:   &fakeSecret{token: freshToken},
+		npmrc:    &fakeNpmrc{token: disk},
+		verifier: &fakeVerifier{outcomes: outcomes},
+		cache:    &fakeCache{},
+		env:      map[string]string{},
+		entry: config.Entry{
+			File: "/tmp/.npmrc", Vault: "MyVault", Item: "MyItem", Field: "tokenfield",
+		}.WithDefaults(),
 	}
 }
 
-func TestSucceedsFirstTryWithoutTouchingOnePassword(t *testing.T) {
-	r := &fakeRunner{codes: []int{0}}
-	s := &fakeSecret{token: freshToken}
-	n := &fakeNpmrc{token: staleToken}
+func (h *harness) deps() passthrough.Deps {
+	return passthrough.Deps{
+		LoadEntry: func() (string, config.Entry, error) {
+			h.loaded = true
+			return configName, h.entry, nil
+		},
+		Secret:      h.secret,
+		Npmrc:       h.npmrc,
+		Runner:      h.runner,
+		Verifier:    h.verifier,
+		Cache:       h.cache,
+		Getenv:      func(key string) string { return h.env[key] },
+		WriteMarker: func(path string) error { h.markers = append(h.markers, path); return nil },
+		Log:         logger.New(&h.log),
+	}
+}
 
-	if err := passthrough.Run(t.Context(), deps(r, s, n, logger.Discard()), nil); err != nil {
+func (h *harness) run(t *testing.T, args ...string) error {
+	t.Helper()
+	return passthrough.Run(t.Context(), h.deps(), args)
+}
+
+// rejected is the only starting point that justifies a vault read.
+func rejected() map[string]verify.Outcome {
+	return map[string]verify.Outcome{staleToken: verify.Rejected}
+}
+
+func TestSucceedsFirstTryWithoutProbingOrPrompting(t *testing.T) {
+	h := newHarness([]int{0}, staleToken, rejected())
+
+	if err := h.run(t); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if len(r.calls) != 1 {
-		t.Errorf("ran pnpm %d times, want 1", len(r.calls))
+	if len(h.runner.calls) != 1 {
+		t.Errorf("ran pnpm %d times, want 1", len(h.runner.calls))
 	}
-	if s.calls != 0 {
-		t.Errorf("fetched from 1Password %d times, want 0 on the happy path", s.calls)
+	if h.verifier.calls() != 0 {
+		t.Errorf("probed the registry %d times, want 0 on the happy path", h.verifier.calls())
 	}
-	if len(n.writes) != 0 {
-		t.Errorf("wrote npmrc %d times, want 0", len(n.writes))
+	if h.secret.calls != 0 {
+		t.Errorf("fetched from 1Password %d times, want 0 on the happy path", h.secret.calls)
+	}
+	if h.loaded { // pnop is a plain pnpm alias until something fails
+		t.Error("loaded the config on the success path")
+	}
+	if h.log.String() != "" {
+		t.Errorf("logged %q, want silence", h.log.String())
 	}
 }
 
@@ -141,184 +228,121 @@ func TestForwardsArgvVerbatim(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := &fakeRunner{codes: []int{0}}
+			h := newHarness([]int{0}, staleToken, rejected())
 
-			if err := passthrough.Run(t.Context(), deps(r, &fakeSecret{}, &fakeNpmrc{}, logger.Discard()), tt.args); err != nil {
+			if err := h.run(t, tt.args...); err != nil {
 				t.Fatalf("Run: %v", err)
 			}
-			if got := r.calls[0]; !equal(got, tt.want) {
+			if got := h.runner.calls[0]; !equal(got, tt.want) {
 				t.Errorf("invocation = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestCurrentTokenExposesOriginalFailure(t *testing.T) {
-	r := &fakeRunner{codes: []int{17}}
-	s := &fakeSecret{token: freshToken}
-	n := &fakeNpmrc{token: freshToken} // already matches 1Password
-	var log strings.Builder
+func TestRejectedTokenIsRefreshedWithoutRerunning(t *testing.T) {
+	h := newHarness([]int{17}, staleToken, map[string]verify.Outcome{
+		staleToken: verify.Rejected,
+		freshToken: verify.Valid,
+	})
 
-	err := passthrough.Run(t.Context(), deps(r, s, n, logger.New(&log)), nil)
+	err := h.run(t, "install")
 
-	assertExitCode(t, err, 17)
-	if len(r.calls) != 1 {
-		t.Errorf("ran pnpm %d times, want 1 (no retry when the token is current)", len(r.calls))
+	assertExitCode(t, err, 17) // the refresh does not change what pnpm reported
+	if len(h.npmrc.writes) != 1 || h.npmrc.writes[0] != freshToken {
+		t.Errorf("npmrc writes = %v, want [%s]", h.npmrc.writes, freshToken)
 	}
-	if len(n.writes) != 0 {
-		t.Errorf("wrote npmrc %d times, want 0", len(n.writes))
+	if len(h.runner.calls) != 1 {
+		t.Errorf("ran pnpm %d times, want 1: reruns are opt-in", len(h.runner.calls))
 	}
-	if !strings.Contains(log.String(), "already current") {
-		t.Errorf("log = %q, want it to explain the token was current", log.String())
-	}
-}
-
-func TestStaleTokenIsRefreshedAndInstallRetried(t *testing.T) {
-	r := &fakeRunner{codes: []int{17, 0}}
-	s := &fakeSecret{token: freshToken}
-	n := &fakeNpmrc{token: staleToken}
-
-	if err := passthrough.Run(t.Context(), deps(r, s, n, logger.Discard()), nil); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	if len(r.calls) != 2 {
-		t.Fatalf("ran pnpm %d times, want 2", len(r.calls))
-	}
-	if len(n.writes) != 1 || n.writes[0] != freshToken {
-		t.Errorf("npmrc writes = %v, want [%s]", n.writes, freshToken)
-	}
-}
-
-// Recovery is not limited to install: any failing command gets it.
-func TestRecoversForAnyCommand(t *testing.T) {
-	for _, cmd := range []string{"install", "up", "add", "publish"} {
-		t.Run(cmd, func(t *testing.T) {
-			r := &fakeRunner{codes: []int{1, 0}}
-			s := &fakeSecret{token: freshToken}
-			n := &fakeNpmrc{token: staleToken}
-
-			if err := passthrough.Run(t.Context(), deps(r, s, n, logger.Discard()), []string{cmd}); err != nil {
-				t.Fatalf("Run: %v", err)
-			}
-			if len(r.calls) != 2 {
-				t.Errorf("ran pnpm %d times, want 2 (retry after refresh)", len(r.calls))
-			}
-			if len(n.writes) != 1 {
-				t.Errorf("npmrc writes = %v, want one", n.writes)
-			}
-		})
+	if !strings.Contains(h.log.String(), "run it again: pnpm install") {
+		t.Errorf("log = %q, want the command printed for the user to rerun", h.log.String())
 	}
 }
 
 // The token is a credential: it must never reach pnop's own output, on any path.
 func TestTokenIsNeverLogged(t *testing.T) {
-	var log strings.Builder
-	r := &fakeRunner{codes: []int{17, 0}}
-	s := &fakeSecret{token: freshToken}
-	n := &fakeNpmrc{token: staleToken}
+	h := newHarness([]int{17}, staleToken, map[string]verify.Outcome{
+		staleToken: verify.Rejected,
+		freshToken: verify.Valid,
+	})
 
-	if err := passthrough.Run(t.Context(), deps(r, s, n, logger.New(&log)), nil); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
+	_ = h.run(t, "install")
 
-	if strings.Contains(log.String(), freshToken) {
-		t.Errorf("log leaked the fresh token: %q", log.String())
+	if strings.Contains(h.log.String(), freshToken) {
+		t.Errorf("log leaked the fresh token: %q", h.log.String())
 	}
-	if strings.Contains(log.String(), staleToken) {
-		t.Errorf("log leaked the previous token: %q", log.String())
+	if strings.Contains(h.log.String(), staleToken) {
+		t.Errorf("log leaked the previous token: %q", h.log.String())
 	}
 }
 
-// A killed pnpm says nothing about credentials, so pnop must not prompt
-// 1Password or retry the install.
-func TestSignalledFailureSkipsTheTokenCheck(t *testing.T) {
-	r := &fakeRunner{codes: []int{137}} // SIGKILL
-	s := &fakeSecret{token: freshToken}
-	n := &fakeNpmrc{token: staleToken}
+// A killed pnpm says nothing about credentials.
+func TestSignalledFailureSkipsTheGate(t *testing.T) {
+	h := newHarness([]int{137}, staleToken, rejected()) // SIGKILL
 
-	err := passthrough.Run(t.Context(), deps(r, s, n, logger.Discard()), nil)
+	err := h.run(t, "install")
 
 	assertExitCode(t, err, 137)
-	if s.calls != 0 {
-		t.Errorf("fetched from 1Password %d times, want 0 for a killed process", s.calls)
+	if h.verifier.calls() != 0 {
+		t.Errorf("probed %d times, want 0 for a killed process", h.verifier.calls())
 	}
-	if len(r.calls) != 1 {
-		t.Errorf("ran pnpm %d times, want 1 (no retry)", len(r.calls))
-	}
-}
-
-func TestRetryFailureReportsSecondExitCode(t *testing.T) {
-	r := &fakeRunner{codes: []int{17, 9}}
-	s := &fakeSecret{token: freshToken}
-	n := &fakeNpmrc{token: staleToken}
-
-	err := passthrough.Run(t.Context(), deps(r, s, n, logger.Discard()), nil)
-
-	assertExitCode(t, err, 9)
-}
-
-func TestMissingNpmrcCountsAsStale(t *testing.T) {
-	r := &fakeRunner{codes: []int{17, 0}}
-	s := &fakeSecret{token: freshToken}
-	n := &fakeNpmrc{token: ""} // no npmrc entry yet
-
-	if err := passthrough.Run(t.Context(), deps(r, s, n, logger.Discard()), nil); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	if len(n.writes) != 1 {
-		t.Errorf("npmrc writes = %v, want the fresh token to be written", n.writes)
+	if h.secret.calls != 0 {
+		t.Errorf("fetched from 1Password %d times, want 0 for a killed process", h.secret.calls)
 	}
 }
 
 func TestOnePasswordFailureKeepsOriginalExitCode(t *testing.T) {
-	r := &fakeRunner{codes: []int{17}}
-	s := &fakeSecret{err: errors.New("op: not signed in")}
-	n := &fakeNpmrc{token: staleToken}
-	var log strings.Builder
+	h := newHarness([]int{17}, staleToken, rejected())
+	h.secret.err = errors.New("op: not signed in")
+	h.secret.token = ""
 
-	err := passthrough.Run(t.Context(), deps(r, s, n, logger.New(&log)), nil)
+	err := h.run(t, "install")
 
 	assertExitCode(t, err, 17)
-	if len(r.calls) != 1 {
-		t.Errorf("ran pnpm %d times, want 1", len(r.calls))
+	if len(h.npmrc.writes) != 0 {
+		t.Errorf("npmrc writes = %v, want none", h.npmrc.writes)
 	}
-	if !strings.Contains(log.String(), "not signed in") {
-		t.Errorf("log = %q, want it to surface the 1Password error", log.String())
+	if !strings.Contains(h.log.String(), "not signed in") {
+		t.Errorf("log = %q, want it to surface the 1Password error", h.log.String())
 	}
 }
 
 func TestNpmrcWriteFailureKeepsOriginalExitCode(t *testing.T) {
-	r := &fakeRunner{codes: []int{17}}
-	s := &fakeSecret{token: freshToken}
-	n := &fakeNpmrc{token: staleToken, writeErr: errors.New("permission denied")}
+	h := newHarness([]int{17}, staleToken, map[string]verify.Outcome{
+		staleToken: verify.Rejected,
+		freshToken: verify.Valid,
+	})
+	h.npmrc.writeErr = errors.New("permission denied")
 
-	err := passthrough.Run(t.Context(), deps(r, s, n, logger.Discard()), nil)
+	err := h.run(t, "install")
 
 	assertExitCode(t, err, 17)
-	if len(r.calls) != 1 {
-		t.Errorf("ran pnpm %d times, want 1 (no retry when the write failed)", len(r.calls))
+	if len(h.runner.calls) != 1 {
+		t.Errorf("ran pnpm %d times, want 1", len(h.runner.calls))
 	}
 }
 
 func TestNpmrcReadFailureKeepsOriginalExitCode(t *testing.T) {
-	r := &fakeRunner{codes: []int{17}}
-	s := &fakeSecret{token: freshToken}
-	n := &fakeNpmrc{readErr: errors.New("permission denied")}
+	h := newHarness([]int{17}, staleToken, rejected())
+	h.npmrc.readErr = errors.New("permission denied")
 
-	err := passthrough.Run(t.Context(), deps(r, s, n, logger.Discard()), nil)
+	err := h.run(t, "install")
 
 	assertExitCode(t, err, 17)
-	if s.calls != 0 {
-		t.Errorf("fetched from 1Password %d times, want 0 when the npmrc is unreadable", s.calls)
+	if h.verifier.calls() != 0 {
+		t.Errorf("probed %d times, want 0 when the npmrc is unreadable", h.verifier.calls())
+	}
+	if h.secret.calls != 0 {
+		t.Errorf("fetched from 1Password %d times, want 0 when the npmrc is unreadable", h.secret.calls)
 	}
 }
 
 func TestPnpmMissingIsAnError(t *testing.T) {
-	r := &fakeRunner{err: errors.New("executable file not found")}
+	h := newHarness(nil, staleToken, rejected())
+	h.runner.err = errors.New("executable file not found")
 
-	err := passthrough.Run(t.Context(), deps(r, &fakeSecret{}, &fakeNpmrc{}, logger.Discard()), nil)
+	err := h.run(t, "install")
 
 	if err == nil {
 		t.Fatal("Run succeeded, want an error")
@@ -326,6 +350,29 @@ func TestPnpmMissingIsAnError(t *testing.T) {
 	var exitErr *cli.ExitError
 	if errors.As(err, &exitErr) {
 		t.Errorf("err = %v, want a plain error rather than an exit code", err)
+	}
+}
+
+// An unconfigured pnop must still surface pnpm's own failure, not replace it
+// with a configuration error.
+func TestUnconfiguredFailurePreservesExitCode(t *testing.T) {
+	h := newHarness([]int{17}, staleToken, rejected())
+	d := h.deps()
+	d.LoadEntry = func() (string, config.Entry, error) {
+		return "", config.Entry{}, errors.New("pnop is not configured yet")
+	}
+
+	err := passthrough.Run(t.Context(), d, []string{"install"})
+
+	assertExitCode(t, err, 17)
+	if h.verifier.calls() != 0 {
+		t.Errorf("probed %d times, want 0 when unconfigured", h.verifier.calls())
+	}
+	if h.secret.calls != 0 {
+		t.Errorf("hit 1Password %d times, want 0 when unconfigured", h.secret.calls)
+	}
+	if !strings.Contains(h.log.String(), "not configured") {
+		t.Errorf("log = %q, want it to explain the config problem", h.log.String())
 	}
 }
 
@@ -337,59 +384,6 @@ func assertExitCode(t *testing.T, err error, want int) {
 	}
 	if exitErr.Code != want {
 		t.Errorf("exit code = %d, want %d", exitErr.Code, want)
-	}
-}
-
-// pnop must work as a plain pnpm alias before `pnop setup` has ever run: a
-// successful command must never touch the config.
-func TestSuccessNeverLoadsConfig(t *testing.T) {
-	loaded := false
-	d := passthrough.Deps{
-		LoadEntry: func() (config.Entry, error) {
-			loaded = true
-			return config.Entry{}, errors.New("not configured")
-		},
-		Secret: &fakeSecret{},
-		Npmrc:  &fakeNpmrc{},
-		Runner: &fakeRunner{codes: []int{0}},
-		Log:    logger.Discard(),
-	}
-
-	if err := passthrough.Run(t.Context(), d, []string{"run", "build"}); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if loaded {
-		t.Error("config was loaded on the success path")
-	}
-}
-
-// An unconfigured pnop must still surface pnpm's own failure, not replace it
-// with a configuration error.
-func TestUnconfiguredFailurePreservesExitCode(t *testing.T) {
-	var log strings.Builder
-	r := &fakeRunner{codes: []int{17}}
-	s := &fakeSecret{token: freshToken}
-	d := passthrough.Deps{
-		LoadEntry: func() (config.Entry, error) {
-			return config.Entry{}, errors.New("pnop is not configured yet")
-		},
-		Secret: s,
-		Npmrc:  &fakeNpmrc{},
-		Runner: r,
-		Log:    logger.New(&log),
-	}
-
-	err := passthrough.Run(t.Context(), d, []string{"install"})
-
-	assertExitCode(t, err, 17)
-	if len(r.calls) != 1 {
-		t.Errorf("ran pnpm %d times, want 1 (no retry)", len(r.calls))
-	}
-	if s.calls != 0 {
-		t.Errorf("hit 1Password %d times, want 0 when unconfigured", s.calls)
-	}
-	if !strings.Contains(log.String(), "not configured") {
-		t.Errorf("log = %q, want it to explain the config problem", log.String())
 	}
 }
 

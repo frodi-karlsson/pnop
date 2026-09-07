@@ -14,9 +14,11 @@ import (
 	"github.com/frodi-karlsson/pnop/internal/cli/setup"
 	"github.com/frodi-karlsson/pnop/internal/config"
 	"github.com/frodi-karlsson/pnop/internal/logger"
+	"github.com/frodi-karlsson/pnop/internal/negcache"
 	"github.com/frodi-karlsson/pnop/internal/npmrc"
 	"github.com/frodi-karlsson/pnop/internal/runner"
 	"github.com/frodi-karlsson/pnop/internal/secret"
+	"github.com/frodi-karlsson/pnop/internal/verify"
 	"github.com/frodi-karlsson/pnop/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -71,7 +73,11 @@ func newRoot() *cobra.Command {
 func printVersions(ctx context.Context, out io.Writer) error {
 	_, _ = fmt.Fprintf(out, "pnop %s\n", version.Version)
 
-	pnpmVersion, code, err := execRunner().Output(ctx, passthrough.PackageManager, "--version")
+	pnpm := passthrough.PackageManager
+	if override := os.Getenv(passthrough.BinEnv); override != "" {
+		pnpm = override
+	}
+	pnpmVersion, code, err := execRunner().Output(ctx, pnpm, "--version")
 	if err != nil || code != 0 {
 		_, _ = fmt.Fprintln(out, "pnpm not found on PATH")
 		return nil
@@ -85,27 +91,44 @@ func execRunner() runner.Exec {
 }
 
 func passthroughDeps() passthrough.Deps {
+	log := logger.New(os.Stderr)
 	return passthrough.Deps{
 		LoadEntry: loadActiveEntry,
 		Secret:    secret.OP{Stdin: os.Stdin, Stderr: os.Stderr},
 		Npmrc:     npmrc.FileStore{},
 		Runner:    execRunner(),
-		Log:       logger.New(os.Stderr),
+		Verifier:  verify.HTTP{Log: log},
+		Cache:     probeCache(log),
+		Log:       log,
 	}
 }
 
-// loadActiveEntry resolves the config the active profile points at. It is
-// deliberately not called until a pnpm command has failed.
-func loadActiveEntry() (config.Entry, error) {
+// probeCache locates the negative cache, or returns nil when the platform will
+// not say where per-user cache files belong. A missing cache costs repeated
+// 1Password reads on a failing registry; it is not worth refusing to run over.
+func probeCache(log logger.Logger) negcache.Cache {
+	dir, err := negcache.Default()
+	if err != nil {
+		log.Warnf("%v", err)
+		return nil
+	}
+	return dir
+}
+
+// loadActiveEntry resolves the config the active profile points at, and its
+// name, which keys the negative cache. It is deliberately not called until a
+// pnpm command has failed.
+func loadActiveEntry() (string, config.Entry, error) {
 	path, err := config.Path()
 	if err != nil {
-		return config.Entry{}, err
+		return "", config.Entry{}, err
 	}
 	cfg, err := config.Load(path)
 	if err != nil {
-		return config.Entry{}, err
+		return "", config.Entry{}, err
 	}
-	return cfg.ActiveEntry()
+	entry, err := cfg.ActiveEntry()
+	return cfg.Active, entry, err
 }
 
 func setupDeps() (setup.Deps, error) {
@@ -114,13 +137,15 @@ func setupDeps() (setup.Deps, error) {
 		return setup.Deps{}, err
 	}
 
+	log := logger.New(os.Stderr)
 	return setup.Deps{
 		ConfigPath: path,
 		Secret:     secret.OP{Stdin: os.Stdin, Stderr: os.Stderr},
 		Npmrc:      npmrc.FileStore{},
+		Identifier: verify.HTTP{Log: log},
 		LoadConfig: config.Load,
 		SaveConfig: config.Save,
-		Log:        logger.New(os.Stderr),
+		Log:        log,
 	}, nil
 }
 
