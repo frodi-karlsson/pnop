@@ -39,6 +39,8 @@ Setup probes what it fetched and reports who it belongs to:
 
 Right now is the only claim. Every npm token expires: granular tokens carry a mandatory expiry, and `npm login` writes a session token that dies within the day, so an item holding one of those makes almost every command prompt. Setup also warns when the npmrc it manages names a different registry than the config does.
 
+Any flag defines the config outright: what you pass is the whole entry, and what you leave out goes back to its default rather than to whatever was there before. That is how an optional field is cleared, and it means a half-typed command fails instead of silently inheriting the rest of an old config. With no flags at all, `+setup -c <name>` is a pure profile switch.
+
 `--file` defaults to `~/.npmrc`, which is what pnpm reads. Pass it only if your token lives elsewhere. Setup is needed for recovery alone, so pnop works as a plain pnpm alias before you configure anything.
 
 To rewrite the npmrc from 1Password on demand, without waiting for a command to fail:
@@ -84,7 +86,7 @@ A refresh does not rerun your command. pnop cannot see whether the first attempt
 
 ## Deliberate no-ops
 
-- **No rerun by default.** Opt in with `rerun = true` in the config, or `PNOP_RERUN=1` once. The rerun carries `PNOP_RETRIED=1` in its own environment, so one refresh is the budget even when a pnpm script calls pnpm.
+- **No rerun by default.** Opt in with `--rerun` at setup, `rerun = true` in the config, or `PNOP_RERUN=1` once. The rerun carries `PNOP_RETRIED=1` in its own environment, so one refresh is the budget even when a pnpm script calls pnpm.
 - **A valid but too narrow token is not recovered.** If the package you asked for is outside its grants, whoami answers 200 while pnpm answers 404: identity and authorization are different questions. Run `pnop +setup -c <name>` to refetch.
 - **Only the registry your config names is probed.** A config holds one registry and one vault field, so a 401 from another host could only be answered with a credential that does not belong to it. Use one config per registry.
 - **Repeated failures do not repeat the prompt.** When a vault read cannot help, pnop remembers that for ten minutes under `~/Library/Caches/pnop` and says so instead of prompting again.
