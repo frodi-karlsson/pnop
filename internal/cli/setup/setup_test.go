@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/frodi-karlsson/pnop/internal/cli/setup"
 	"github.com/frodi-karlsson/pnop/internal/config"
 	"github.com/frodi-karlsson/pnop/internal/logger"
+	"github.com/frodi-karlsson/pnop/internal/verify"
 )
 
 type fakeSecret struct {
@@ -30,9 +32,34 @@ type fakeNpmrc struct {
 	token    string
 	writeErr error
 	writes   int
+	named    string // empty means it agrees with whatever the config manages
 }
 
 func (f *fakeNpmrc) ReadToken(_, _ string) (string, error) { return f.token, nil }
+
+func (f *fakeNpmrc) ReadRegistry(_ string) (string, error) {
+	if f.named == "" {
+		return f.registry, nil
+	}
+	return f.named, nil
+}
+
+// fakeIdentifier answers for the token setup just fetched.
+type fakeIdentifier struct {
+	user    string
+	outcome verify.Outcome
+	tokens  []string
+}
+
+func (f *fakeIdentifier) Verify(ctx context.Context, registry, token string) verify.Outcome {
+	_, outcome := f.Identify(ctx, registry, token)
+	return outcome
+}
+
+func (f *fakeIdentifier) Identify(_ context.Context, _, token string) (string, verify.Outcome) {
+	f.tokens = append(f.tokens, token)
+	return f.user, f.outcome
+}
 
 func (f *fakeNpmrc) WriteToken(path, registry, token string) error {
 	if f.writeErr != nil {
@@ -74,6 +101,9 @@ func deps(t *testing.T, sec *fakeSecret, n *fakeNpmrc, store *stubStore) setup.D
 		Log:        logger.Discard(),
 	}
 }
+
+// The ordinary case: the npmrc agrees, so setup stays silent.
+func agreeing() *fakeNpmrc { return &fakeNpmrc{named: "registry.npmjs.org"} }
 
 // `pnop setup -c private` with no other flags is a pure profile switch.
 func TestActivatesAnExistingConfig(t *testing.T) {
@@ -208,5 +238,96 @@ func TestDoesNotSaveConfigWhenNpmrcWriteFails(t *testing.T) {
 	}
 	if store.saveN != 0 {
 		t.Error("saved a config despite the npmrc write failing")
+	}
+}
+
+// The identity is reported in the present tense, never as a promise.
+func TestReportsIdentityWithoutPromisingLongevity(t *testing.T) {
+	store := &stubStore{cfg: config.Config{}, loadErr: config.ErrNotConfigured}
+	id := &fakeIdentifier{user: "frodi", outcome: verify.Valid}
+	var log strings.Builder
+
+	d := deps(t, &fakeSecret{token: "tok"}, agreeing(), store)
+	d.Identifier = id
+	d.Log = logger.New(&log)
+
+	err := setup.Run(t.Context(), d, "job", config.Entry{
+		File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F",
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(id.tokens) != 1 || id.tokens[0] != "tok" {
+		t.Errorf("probed %v, want the fetched token once", id.tokens)
+	}
+	if !strings.Contains(log.String(), "accepts this token right now, as frodi") {
+		t.Errorf("log = %q, want the identity in the present tense", log.String())
+	}
+	if !strings.Contains(log.String(), "granular access token") {
+		t.Errorf("log = %q, want the granular-token warning when a config is created", log.String())
+	}
+	if strings.Contains(log.String(), "tok") && !strings.Contains(log.String(), "token") {
+		t.Errorf("log = %q, leaked the token", log.String())
+	}
+}
+
+// A rejected token is still written, but not silently.
+func TestWarnsWhenTheFetchedTokenIsRejected(t *testing.T) {
+	store := &stubStore{cfg: config.Config{}, loadErr: config.ErrNotConfigured}
+	n := agreeing()
+	var log strings.Builder
+
+	d := deps(t, &fakeSecret{token: "dead"}, n, store)
+	d.Identifier = &fakeIdentifier{outcome: verify.Rejected}
+	d.Log = logger.New(&log)
+
+	err := setup.Run(t.Context(), d, "job", config.Entry{
+		File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F",
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if n.writes != 1 {
+		t.Errorf("npmrc writes = %d, want 1: setup writes what it was told to", n.writes)
+	}
+	if !strings.Contains(log.String(), "rejects the token") {
+		t.Errorf("log = %q, want a warning about the rejected token", log.String())
+	}
+}
+
+// A disagreement means pnop would probe a host the command never touched.
+func TestWarnsWhenTheNpmrcNamesAnotherRegistry(t *testing.T) {
+	tests := []struct {
+		name     string
+		named    string
+		wantWarn bool
+	}{
+		{"npmrc agrees", "registry.npmjs.org", false},
+		{"npmrc has no registry line", "registry.npmjs.org", false},
+		{"npmrc points elsewhere", "npm.pkg.github.com", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &stubStore{cfg: config.Config{}, loadErr: config.ErrNotConfigured}
+			var log strings.Builder
+
+			d := deps(t, &fakeSecret{token: "tok"}, &fakeNpmrc{named: tt.named}, store)
+			d.Log = logger.New(&log)
+
+			err := setup.Run(t.Context(), d, "job", config.Entry{
+				File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F",
+			})
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			warned := strings.Contains(log.String(), "sets registry=")
+			if warned != tt.wantWarn {
+				t.Errorf("warned = %v, want %v (log = %q)", warned, tt.wantWarn, log.String())
+			}
+		})
 	}
 }

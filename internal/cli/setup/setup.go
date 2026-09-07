@@ -9,6 +9,7 @@ import (
 	"github.com/frodi-karlsson/pnop/internal/logger"
 	"github.com/frodi-karlsson/pnop/internal/npmrc"
 	"github.com/frodi-karlsson/pnop/internal/secret"
+	"github.com/frodi-karlsson/pnop/internal/verify"
 	"github.com/spf13/cobra"
 )
 
@@ -18,6 +19,7 @@ type Deps struct {
 	ConfigPath string
 	Secret     secret.Fetcher
 	Npmrc      npmrc.Store
+	Identifier verify.Identifier
 	LoadConfig func(path string) (config.Config, error)
 	SaveConfig func(path string, cfg config.Config) error
 	// Log receives progress messages, never the token itself.
@@ -84,9 +86,13 @@ func Run(ctx context.Context, d Deps, name string, flags config.Entry) error {
 	if err != nil {
 		return err
 	}
+
+	report(ctx, d, entry, npmrc.NormalizeToken(token))
+
 	if err := d.Npmrc.WriteToken(entry.File, entry.Registry, token); err != nil {
 		return err
 	}
+	warnRegistryMismatch(d, entry)
 
 	cfg.Configs[name] = entry
 	cfg.Active = name
@@ -96,7 +102,49 @@ func Run(ctx context.Context, d Deps, name string, flags config.Entry) error {
 
 	d.Log.Infof("active config is now %q", name)
 	d.Log.Infof("wrote %s", entry.File)
+	if flags != (config.Entry{}) {
+		d.Log.Infof("the item should hold a granular access token - `npm login` writes a " +
+			"short-lived session token, and an item holding one makes almost every command prompt")
+	}
 	return nil
+}
+
+// report says who the token belongs to, in the present tense: accepted now is
+// not accepted in an hour, and every npm token expires.
+func report(ctx context.Context, d Deps, entry config.Entry, token string) {
+	if d.Identifier == nil {
+		return
+	}
+	switch user, outcome := d.Identifier.Identify(ctx, entry.Registry, token); outcome {
+	case verify.Valid:
+		if user != "" {
+			d.Log.Infof("%s accepts this token right now, as %s", entry.Registry, user)
+			return
+		}
+		d.Log.Infof("%s accepts this token right now", entry.Registry)
+	case verify.Rejected:
+		d.Log.Warnf("%s rejects the token in this item - writing it anyway, since that is what "+
+			"was asked for, but no pnpm command will work until the item holds a live token",
+			entry.Registry)
+	default:
+		d.Log.Infof("could not confirm the token with %s", entry.Registry)
+	}
+}
+
+// warnRegistryMismatch reports a config managing a registry the npmrc does not
+// name, where pnop would be probing a host the failing command never touched.
+// A project-level npmrc can still redirect at run time, which setup cannot see.
+func warnRegistryMismatch(d Deps, entry config.Entry) {
+	named, err := d.Npmrc.ReadRegistry(entry.File)
+	if err != nil {
+		d.Log.Warnf("%v", err)
+		return
+	}
+	if named == entry.Registry {
+		return
+	}
+	d.Log.Warnf("%s sets registry=%s, but this config manages %s - pnop will check and refresh "+
+		"the token for %s only", entry.File, named, entry.Registry, entry.Registry)
 }
 
 // resolveEntry merges any supplied flags over the stored entry, or builds a
