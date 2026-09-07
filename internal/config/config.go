@@ -29,6 +29,11 @@ type Entry struct {
 	Field string `toml:"field"`
 	// Registry is the registry whose _authToken line is managed.
 	Registry string `toml:"registry"`
+	// Rerun opts into running the failed command again after a refresh.
+	// Off by default: a rerun repeats whatever side effect the command had,
+	// and pnop cannot know from the outside whether the first attempt got far
+	// enough to have one.
+	Rerun bool `toml:"rerun"`
 }
 
 // ErrNotConfigured is returned by Load when `pnop setup` has never been run.
@@ -188,8 +193,7 @@ func (e Entry) WithDefaults() Entry {
 	}
 	// A registry pasted as a URL would otherwise build a malformed npmrc key
 	// such as "//https://registry.npmjs.org//:_authToken=".
-	e.Registry = strings.TrimSuffix(
-		strings.TrimPrefix(strings.TrimPrefix(e.Registry, "https://"), "http://"), "/")
+	e.Registry = npmrc.NormalizeRegistry(e.Registry)
 	return e
 }
 

@@ -37,6 +37,9 @@ type Result struct {
 // with a nil error.
 type Runner interface {
 	Run(ctx context.Context, name string, args ...string) (Result, error)
+	// RunEnv is Run with extra variables in the child's environment only, so a
+	// marker meaning "this is the rerun" cannot outlive it.
+	RunEnv(ctx context.Context, extraEnv []string, name string, args ...string) (Result, error)
 	// Output runs the command and captures its stdout, for the rare case
 	// where pnop needs to read a value rather than show the user output.
 	Output(ctx context.Context, name string, args ...string) (string, int, error)
@@ -60,10 +63,24 @@ type Exec struct {
 
 // Run executes name with args, returning its exit status and captured output.
 func (e Exec) Run(ctx context.Context, name string, args ...string) (Result, error) {
+	return e.RunEnv(ctx, nil, name, args...)
+}
+
+// RunEnv is Run with extraEnv added to the child's environment.
+func (e Exec) RunEnv(ctx context.Context, extraEnv []string, name string, args ...string) (Result, error) {
 	if in, out, ok := e.terminal(); ok {
-		return e.runOnPTY(ctx, in, out, name, args...)
+		return e.runOnPTY(ctx, extraEnv, in, out, name, args...)
 	}
-	return e.runPiped(ctx, name, args...)
+	return e.runPiped(ctx, extraEnv, name, args...)
+}
+
+// childEnv returns nil to inherit pnop's environment, or a copy with extraEnv
+// appended, where a later assignment wins.
+func childEnv(extraEnv []string) []string {
+	if len(extraEnv) == 0 {
+		return nil
+	}
+	return append(os.Environ(), extraEnv...)
 }
 
 // terminal reports whether both stdin and stdout are the real terminal, which
@@ -82,13 +99,14 @@ func (e Exec) terminal() (*os.File, *os.File, bool) {
 
 // runOnPTY runs the child attached to a pseudo-terminal, forwarding bytes both
 // ways and keeping a copy of what the child printed.
-func (e Exec) runOnPTY(ctx context.Context, in, out *os.File, name string, args ...string) (Result, error) {
+func (e Exec) runOnPTY(ctx context.Context, extraEnv []string, in, out *os.File, name string, args ...string) (Result, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = childEnv(extraEnv)
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		// No PTY available: fall back rather than fail the command outright.
-		return e.runPiped(ctx, name, args...)
+		return e.runPiped(ctx, extraEnv, name, args...)
 	}
 	defer func() { _ = ptmx.Close() }()
 
@@ -114,8 +132,9 @@ func (e Exec) runOnPTY(ctx context.Context, in, out *os.File, name string, args 
 
 // runPiped runs the child with its streams wired straight through, teeing the
 // output. Used when there is no terminal to preserve.
-func (e Exec) runPiped(ctx context.Context, name string, args ...string) (Result, error) {
+func (e Exec) runPiped(ctx context.Context, extraEnv []string, name string, args ...string) (Result, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = childEnv(extraEnv)
 	tail := &tailBuffer{limit: tailBytes}
 
 	cmd.Stdin = e.Stdin

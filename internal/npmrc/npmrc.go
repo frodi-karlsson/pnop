@@ -25,6 +25,9 @@ var tokenMarkers = []string{":_authToken=", ":_auth="}
 type Store interface {
 	ReadToken(path, registry string) (string, error)
 	WriteToken(path, registry, token string) error
+	// ReadRegistry returns the registry the npmrc itself names, so a caller
+	// can tell whether it manages the registry pnpm will actually use.
+	ReadRegistry(path string) (string, error)
 }
 
 // FileStore is the real filesystem-backed Store.
@@ -53,6 +56,37 @@ func (FileStore) ReadToken(path, registry string) (string, error) {
 		}
 	}
 	return token, nil
+}
+
+// ReadRegistry returns the host from the npmrc's `registry=` line, or
+// DefaultRegistry when there is none, which is what npm falls back to. The last
+// occurrence wins, as npm does.
+func (FileStore) ReadRegistry(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return DefaultRegistry, nil
+		}
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+
+	registry := DefaultRegistry
+	for line := range strings.SplitSeq(string(b), "\n") {
+		if after, ok := strings.CutPrefix(strings.TrimSpace(line), "registry="); ok {
+			if value := NormalizeRegistry(after); value != "" {
+				registry = value
+			}
+		}
+	}
+	return registry, nil
+}
+
+// NormalizeRegistry reduces a registry to the bare form pnop stores and
+// compares: no scheme, no trailing slash.
+func NormalizeRegistry(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimPrefix(strings.TrimPrefix(value, "https://"), "http://")
+	return strings.TrimSuffix(value, "/")
 }
 
 // WriteToken sets the auth token for registry in the npmrc at path, leaving

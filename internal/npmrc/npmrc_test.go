@@ -289,3 +289,63 @@ func readFile(t *testing.T, path string) string {
 	}
 	return string(b)
 }
+
+func TestReadRegistry(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"no registry line means npmjs", "//registry.npmjs.org/:_authToken=x\n", npmrc.DefaultRegistry},
+		{"bare host", "registry=registry.npmjs.org\n", "registry.npmjs.org"},
+		{"scheme and trailing slash are noise", "registry=https://registry.npmjs.org/\n", "registry.npmjs.org"},
+		{"another registry", "registry=https://npm.pkg.github.com\n", "npm.pkg.github.com"},
+		{"the last line wins, as npm does", "registry=a.example\nregistry=b.example\n", "b.example"},
+		{"indented lines still count", "  registry=https://a.example/  \n", "a.example"},
+		{"scoped registries are not the default", "@scope:registry=https://a.example/\n", npmrc.DefaultRegistry},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), ".npmrc")
+			if err := os.WriteFile(path, []byte(tt.content), 0o600); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+
+			got, err := npmrc.FileStore{}.ReadRegistry(path)
+			if err != nil {
+				t.Fatalf("ReadRegistry: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("ReadRegistry = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// A missing npmrc is not an error: it means the default registry, which is
+// what pnpm would use, so a config managing npmjs agrees with it.
+func TestReadRegistryOfAMissingFile(t *testing.T) {
+	got, err := npmrc.FileStore{}.ReadRegistry(filepath.Join(t.TempDir(), "absent"))
+	if err != nil {
+		t.Fatalf("ReadRegistry: %v", err)
+	}
+	if got != npmrc.DefaultRegistry {
+		t.Errorf("ReadRegistry = %q, want %q", got, npmrc.DefaultRegistry)
+	}
+}
+
+func TestNormalizeRegistry(t *testing.T) {
+	tests := map[string]string{
+		"registry.npmjs.org":          "registry.npmjs.org",
+		"https://registry.npmjs.org/": "registry.npmjs.org",
+		"http://localhost:4873/":      "localhost:4873",
+		"  https://a.example  ":       "a.example",
+	}
+
+	for in, want := range tests {
+		if got := npmrc.NormalizeRegistry(in); got != want {
+			t.Errorf("NormalizeRegistry(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
