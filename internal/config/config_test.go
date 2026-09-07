@@ -14,7 +14,7 @@ func TestSaveIsOwnerOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	cfg := config.Config{
 		Active:  "job",
-		Configs: map[string]config.Entry{"job": {File: "/tmp/.npmrc", Vault: "MyVault", Item: "tok", Field: "tokenfield"}},
+		Configs: map[string]config.Entry{"job": {File: "/tmp/.npmrc", Command: "print tok"}},
 	}
 
 	if err := config.Save(path, cfg); err != nil {
@@ -38,7 +38,7 @@ func TestWithDefaultsNormalisesRegistryURL(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := config.Entry{File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F", Registry: tt.in}.WithDefaults()
+		got := config.Entry{File: "/tmp/.npmrc", Command: "print I", Registry: tt.in}.WithDefaults()
 		if got.Registry != tt.want {
 			t.Errorf("Registry(%q) = %q, want %q", tt.in, got.Registry, tt.want)
 		}
@@ -46,7 +46,7 @@ func TestWithDefaultsNormalisesRegistryURL(t *testing.T) {
 }
 
 func TestWithDefaultsFillsFile(t *testing.T) {
-	got := config.Entry{Vault: "V", Item: "I", Field: "F"}.WithDefaults()
+	got := config.Entry{Command: "print I"}.WithDefaults()
 
 	if got.File != "~/.npmrc" {
 		t.Errorf("File = %q, want ~/.npmrc", got.File)
@@ -61,7 +61,7 @@ func TestSaveTightensPermissionsOnAnExistingFile(t *testing.T) {
 
 	cfg := config.Config{
 		Active:  "job",
-		Configs: map[string]config.Entry{"job": {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F"}},
+		Configs: map[string]config.Entry{"job": {File: "/tmp/.npmrc", Command: "print I"}},
 	}
 	if err := config.Save(path, cfg); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -112,35 +112,58 @@ func TestSaveRejectsIncompleteConfig(t *testing.T) {
 }
 
 func TestWithDefaults(t *testing.T) {
-	got := config.Entry{File: "/tmp/.npmrc", Vault: "MyVault", Item: "tok", Field: "tokenfield"}.WithDefaults()
+	got := config.Entry{File: "/tmp/.npmrc", Command: "op read op://V/i/f"}.WithDefaults()
 
 	if got.Registry != "registry.npmjs.org" {
 		t.Errorf("Registry = %q, want registry.npmjs.org", got.Registry)
 	}
 }
 
-// Vault, item and field describe the user's own 1Password layout, so pnop must
-// never guess them.
-func TestWithDefaultsNeverGuessesTheItemLayout(t *testing.T) {
+// The command describes where a user keeps a token, so pnop must never guess.
+func TestWithDefaultsNeverGuessesTheCommand(t *testing.T) {
 	got := config.Entry{File: "/tmp/.npmrc"}.WithDefaults()
 
-	if got.Vault != "" || got.Item != "" || got.Field != "" {
-		t.Errorf("WithDefaults invented vault=%q item=%q field=%q, want all empty",
-			got.Vault, got.Item, got.Field)
+	if got.Command != "" {
+		t.Errorf("WithDefaults invented command %q, want empty", got.Command)
 	}
 	if err := got.Validate(); err == nil {
-		t.Error("Validate accepted a config with no vault/item/field")
+		t.Error("Validate accepted a config with no command")
+	}
+}
+
+// A config written before pnop took a command still works: the 1Password
+// coordinates become the command they used to build, and stop being stored.
+func TestWithDefaultsMigratesTheOldCoordinates(t *testing.T) {
+	got := config.Entry{File: "/tmp/.npmrc", Vault: "MyVault", Item: "My Item", Field: "tokenfield"}.WithDefaults()
+
+	want := config.LegacyCommand("MyVault", "My Item", "tokenfield")
+	if got.Command != want {
+		t.Errorf("Command = %q, want %q", got.Command, want)
+	}
+	if got.Vault != "" || got.Item != "" || got.Field != "" {
+		t.Errorf("kept vault=%q item=%q field=%q, want them dropped", got.Vault, got.Item, got.Field)
+	}
+	if err := got.Validate(); err != nil {
+		t.Errorf("Validate: %v, want a migrated entry to be usable", err)
+	}
+}
+
+// An explicit command wins over coordinates left behind in an old file.
+func TestCommandBeatsTheOldCoordinates(t *testing.T) {
+	got := config.Entry{File: "/tmp/.npmrc", Command: "mine", Vault: "V", Item: "I", Field: "F"}.WithDefaults()
+
+	if got.Command != "mine" {
+		t.Errorf("Command = %q, want the explicit one", got.Command)
 	}
 }
 
 func TestWithDefaultsKeepsExplicitValues(t *testing.T) {
 	got := config.Entry{
-		File: "/tmp/.npmrc", Vault: "MyVault", Item: "tok",
-		Field: "otherfield", Registry: "npm.pkg.github.com",
+		File: "/tmp/.npmrc", Command: "print-token", Registry: "npm.pkg.github.com",
 	}.WithDefaults()
 
-	if got.Field != "otherfield" {
-		t.Errorf("Field = %q, want otherfield", got.Field)
+	if got.Command != "print-token" {
+		t.Errorf("Command = %q, want print-token", got.Command)
 	}
 	if got.Registry != "npm.pkg.github.com" {
 		t.Errorf("Registry = %q, want npm.pkg.github.com", got.Registry)
@@ -225,8 +248,8 @@ func TestSaveLoadDocumentRoundTrip(t *testing.T) {
 	if len(got.Configs) != 2 {
 		t.Fatalf("got %d configs, want 2", len(got.Configs))
 	}
-	if got.Configs["private"].Item != ".npmrc.private" {
-		t.Errorf("private item = %q, want .npmrc.private", got.Configs["private"].Item)
+	if got.Configs["private"].Command == "" {
+		t.Error("private command was lost in the round trip")
 	}
 }
 
@@ -262,8 +285,8 @@ func TestActiveEntry(t *testing.T) {
 	cfg := config.Config{
 		Active: "job",
 		Configs: map[string]config.Entry{
-			"job":     {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F"},
-			"private": {File: "/tmp/.npmrc", Vault: "E", Item: "P", Field: "password"},
+			"job":     {File: "/tmp/.npmrc", Command: "print I"},
+			"private": {File: "/tmp/.npmrc", Command: "print P"},
 		},
 	}
 
@@ -271,14 +294,14 @@ func TestActiveEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ActiveEntry: %v", err)
 	}
-	if got.Vault != "V" {
-		t.Errorf("Vault = %q, want V", got.Vault)
+	if got.Command != "print I" {
+		t.Errorf("Command = %q, want the active entry's", got.Command)
 	}
 }
 
 func TestActiveEntryWithNoActiveSet(t *testing.T) {
 	cfg := config.Config{
-		Configs: map[string]config.Entry{"job": {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F"}},
+		Configs: map[string]config.Entry{"job": {File: "/tmp/.npmrc", Command: "print I"}},
 	}
 
 	if _, err := cfg.ActiveEntry(); !errors.Is(err, config.ErrNoActive) {

@@ -18,15 +18,26 @@ import (
 // DefaultFile is the npmrc pnop manages when an entry does not name one.
 const DefaultFile = "~/.npmrc"
 
+// LegacyCommand renders the 1Password invocation pnop used to build from a
+// vault, item and field, so a config written before commands keeps working.
+func LegacyCommand(vault, item, field string) string {
+	return fmt.Sprintf("op item get %q --vault %q --fields label=%q --reveal", item, vault, field)
+}
+
 // Entry is one named credential configuration: which npmrc to keep in sync,
-// and where its token lives in 1Password.
+// and the command that prints the token to put in it.
 type Entry struct {
 	// File is the npmrc pnop keeps in sync. pnpm reads ~/.npmrc.
 	File string `toml:"file"`
-	// Vault, Item and Field locate the token in 1Password.
-	Vault string `toml:"vault"`
-	Item  string `toml:"item"`
-	Field string `toml:"field"`
+	// Command prints the token on stdout. Any command will do, which is why
+	// pnop needs to know nothing about how a vault is arranged.
+	Command string `toml:"command"`
+	// Vault, Item and Field are the 1Password coordinates pnop used before it
+	// took a command. They are read so an old config still works, rewritten as
+	// a Command on the next save, and never written back.
+	Vault string `toml:"vault,omitempty"`
+	Item  string `toml:"item,omitempty"`
+	Field string `toml:"field,omitempty"`
 	// Registry is the registry whose _authToken line is managed.
 	Registry string `toml:"registry"`
 	// Rerun opts into running the failed command again after a refresh.
@@ -171,20 +182,22 @@ func (e Entry) Validate() error {
 	switch {
 	case e.File == "":
 		return errors.New("file is required")
-	case e.Vault == "":
-		return errors.New("vault is required")
-	case e.Item == "":
-		return errors.New("item is required")
-	case e.Field == "":
-		return errors.New("field is required")
+	case e.Command == "":
+		return errors.New("command is required")
 	}
 	return nil
 }
 
-// WithDefaults fills in the optional fields that callers may leave blank.
-// Vault, Item and Field have no defaults: they describe the user's own
-// 1Password layout, which pnop makes no assumptions about.
+// WithDefaults fills in the optional fields that callers may leave blank, and
+// carries an old entry's 1Password coordinates over to a Command. The command
+// itself has no default: it describes where the user keeps a token, which pnop
+// makes no assumptions about.
 func (e Entry) WithDefaults() Entry {
+	if e.Command == "" && e.Vault != "" && e.Item != "" && e.Field != "" {
+		e.Command = LegacyCommand(e.Vault, e.Item, e.Field)
+	}
+	e.Vault, e.Item, e.Field = "", "", ""
+
 	if e.File == "" {
 		e.File = DefaultFile
 	}

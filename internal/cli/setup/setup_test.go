@@ -14,16 +14,14 @@ import (
 )
 
 type fakeSecret struct {
-	token string
-	err   error
-	vault string
-	item  string
-	field string
-	calls int
+	token   string
+	err     error
+	command string
+	calls   int
 }
 
-func (f *fakeSecret) Fetch(_ context.Context, vault, item, field string) (string, error) {
-	f.vault, f.item, f.field = vault, item, field
+func (f *fakeSecret) Fetch(_ context.Context, command string) (string, error) {
+	f.command = command
 	f.calls++
 	return f.token, f.err
 }
@@ -112,8 +110,8 @@ func TestActivatesAnExistingConfig(t *testing.T) {
 	store := &stubStore{cfg: config.Config{
 		Active: "job",
 		Configs: map[string]config.Entry{
-			"job":     {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F", Registry: "registry.npmjs.org"},
-			"private": {File: "/tmp/.npmrc", Vault: "E", Item: "P", Field: "password", Registry: "registry.npmjs.org"},
+			"job":     {File: "/tmp/.npmrc", Command: "print I", Registry: "registry.npmjs.org"},
+			"private": {File: "/tmp/.npmrc", Command: "print P", Registry: "registry.npmjs.org"},
 		},
 	}}
 	sec := &fakeSecret{token: "private_tok"}
@@ -126,8 +124,8 @@ func TestActivatesAnExistingConfig(t *testing.T) {
 	if store.saved.Active != "private" {
 		t.Errorf("Active = %q, want private", store.saved.Active)
 	}
-	if sec.item != "P" {
-		t.Errorf("fetched item %q, want P", sec.item)
+	if sec.command != "print P" {
+		t.Errorf("ran %q, want the config's command", sec.command)
 	}
 	if n.token != "private_tok" {
 		t.Errorf("wrote token %q, want private_tok", n.token)
@@ -140,7 +138,7 @@ func TestCreatesThenActivates(t *testing.T) {
 	sec := &fakeSecret{token: "tok"}
 
 	err := setup.Run(t.Context(), deps(t, sec, &fakeNpmrc{}, store), "job", config.Entry{
-		Vault: "V", Item: "I", Field: "F",
+		Command: "print I",
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -150,8 +148,8 @@ func TestCreatesThenActivates(t *testing.T) {
 		t.Errorf("Active = %q, want job", store.saved.Active)
 	}
 	entry := store.saved.Configs["job"]
-	if entry.Vault != "V" || entry.Item != "I" || entry.Field != "F" {
-		t.Errorf("saved entry = %+v, want V/I/F", entry)
+	if entry.Command != "print I" {
+		t.Errorf("saved command = %q, want the one that was passed", entry.Command)
 	}
 	if entry.Registry != "registry.npmjs.org" {
 		t.Errorf("Registry = %q, want the default", entry.Registry)
@@ -162,7 +160,7 @@ func TestCreatesThenActivates(t *testing.T) {
 // before anything is written.
 func TestActivatingAnUnknownConfigFails(t *testing.T) {
 	store := &stubStore{cfg: config.Config{
-		Configs: map[string]config.Entry{"job": {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F"}},
+		Configs: map[string]config.Entry{"job": {File: "/tmp/.npmrc", Command: "print I"}},
 	}}
 	n := &fakeNpmrc{}
 
@@ -181,13 +179,13 @@ func TestFlagsReplaceTheWholeConfig(t *testing.T) {
 	store := &stubStore{cfg: config.Config{
 		Active: "job",
 		Configs: map[string]config.Entry{
-			"job":     {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F", Registry: "registry.npmjs.org"},
-			"private": {File: "/tmp/.npmrc", Vault: "E", Item: "P", Field: "password", Registry: "registry.npmjs.org"},
+			"job":     {File: "/tmp/.npmrc", Command: "print I", Registry: "registry.npmjs.org"},
+			"private": {File: "/tmp/.npmrc", Command: "print P", Registry: "registry.npmjs.org"},
 		},
 	}}
 
 	err := setup.Run(t.Context(), deps(t, &fakeSecret{token: "t"}, agreeing(), store), "job", config.Entry{
-		Vault: "V2", Item: "I2", Field: "F2", File: "/tmp/.npmrc",
+		Command: "print I2", File: "/tmp/.npmrc",
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -195,31 +193,31 @@ func TestFlagsReplaceTheWholeConfig(t *testing.T) {
 
 	// The omitted registry returns to its default rather than keeping the
 	// stored one: that is how an optional field is cleared.
-	want := config.Entry{File: "/tmp/.npmrc", Vault: "V2", Item: "I2", Field: "F2", Registry: "registry.npmjs.org"}
+	want := config.Entry{File: "/tmp/.npmrc", Command: "print I2", Registry: "registry.npmjs.org"}
 	if got := store.saved.Configs["job"]; got != want {
 		t.Errorf("job = %+v, want %+v", got, want)
 	}
-	if got := store.saved.Configs["private"].Vault; got != "E" {
-		t.Errorf("private vault = %q, want it untouched", got)
+	if got := store.saved.Configs["private"].Command; got != "print P" {
+		t.Errorf("private command = %q, want it untouched", got)
 	}
 }
 
-// Replacing means a half-typed command cannot quietly inherit the rest of an
-// old config, so it fails before anything is fetched or written.
-func TestPartialFlagsAreRefused(t *testing.T) {
+// Replacing means a config cannot quietly inherit what the flags left out, so
+// an entry with no command fails before anything is fetched or written.
+func TestReplacingWithoutACommandIsRefused(t *testing.T) {
 	store := &stubStore{cfg: config.Config{
 		Active:  "job",
-		Configs: map[string]config.Entry{"job": {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F"}},
+		Configs: map[string]config.Entry{"job": {File: "/tmp/.npmrc", Command: "print I"}},
 	}}
 	sec := &fakeSecret{token: "t"}
 	n := agreeing()
 
-	err := setup.Run(t.Context(), deps(t, sec, n, store), "job", config.Entry{Field: "F2"})
+	err := setup.Run(t.Context(), deps(t, sec, n, store), "job", config.Entry{File: "/tmp/other.npmrc"})
 
 	if err == nil {
 		t.Fatal("Run succeeded, want an error naming what is missing")
 	}
-	if !strings.Contains(err.Error(), "vault is required") || !strings.Contains(err.Error(), "whole config") {
+	if !strings.Contains(err.Error(), "command is required") || !strings.Contains(err.Error(), "whole config") {
 		t.Errorf("err = %v, want it to name the missing field and explain replacement", err)
 	}
 	if sec.calls != 0 || n.writes != 0 || store.saveN != 0 {
@@ -232,12 +230,12 @@ func TestReplacingClearsTheRerunOptIn(t *testing.T) {
 	store := &stubStore{cfg: config.Config{
 		Active: "job",
 		Configs: map[string]config.Entry{
-			"job": {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F", Registry: "registry.npmjs.org", Rerun: true},
+			"job": {File: "/tmp/.npmrc", Command: "print I", Registry: "registry.npmjs.org", Rerun: true},
 		},
 	}}
 
 	err := setup.Run(t.Context(), deps(t, &fakeSecret{token: "t"}, agreeing(), store), "job", config.Entry{
-		File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F",
+		File: "/tmp/.npmrc", Command: "print I",
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -250,7 +248,7 @@ func TestReplacingClearsTheRerunOptIn(t *testing.T) {
 
 // A pure switch keeps everything, including what the flags cannot express.
 func TestSwitchingKeepsTheStoredEntry(t *testing.T) {
-	stored := config.Entry{File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F", Registry: "npm.pkg.github.com", Rerun: true}
+	stored := config.Entry{File: "/tmp/.npmrc", Command: "print I", Registry: "npm.pkg.github.com", Rerun: true}
 	store := &stubStore{cfg: config.Config{Active: "other", Configs: map[string]config.Entry{"job": stored}}}
 
 	err := setup.Run(t.Context(), deps(t, &fakeSecret{token: "t"}, &fakeNpmrc{named: "npm.pkg.github.com"}, store), "job", config.Entry{})
@@ -276,7 +274,7 @@ func TestDoesNotSaveConfigWhenFetchFails(t *testing.T) {
 	sec := &fakeSecret{err: errors.New("op: not signed in")}
 	n := &fakeNpmrc{}
 
-	err := setup.Run(t.Context(), deps(t, sec, n, store), "job", config.Entry{Vault: "V", Item: "I", Field: "F"})
+	err := setup.Run(t.Context(), deps(t, sec, n, store), "job", config.Entry{Command: "print I"})
 
 	if err == nil {
 		t.Fatal("Run succeeded, want the 1Password error")
@@ -294,7 +292,7 @@ func TestDoesNotSaveConfigWhenNpmrcWriteFails(t *testing.T) {
 	n := &fakeNpmrc{writeErr: errors.New("permission denied")}
 
 	err := setup.Run(t.Context(), deps(t, &fakeSecret{token: "tok"}, n, store), "job", config.Entry{
-		Vault: "V", Item: "I", Field: "F",
+		Command: "print I",
 	})
 
 	if err == nil {
@@ -316,7 +314,7 @@ func TestReportsIdentityWithoutPromisingLongevity(t *testing.T) {
 	d.Log = logger.New(&log)
 
 	err := setup.Run(t.Context(), d, "job", config.Entry{
-		File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F",
+		File: "/tmp/.npmrc", Command: "print I",
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -347,7 +345,7 @@ func TestWarnsWhenTheFetchedTokenIsRejected(t *testing.T) {
 	d.Log = logger.New(&log)
 
 	err := setup.Run(t.Context(), d, "job", config.Entry{
-		File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F",
+		File: "/tmp/.npmrc", Command: "print I",
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -382,7 +380,7 @@ func TestWarnsWhenTheNpmrcNamesAnotherRegistry(t *testing.T) {
 			d.Log = logger.New(&log)
 
 			err := setup.Run(t.Context(), d, "job", config.Entry{
-				File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F",
+				File: "/tmp/.npmrc", Command: "print I",
 			})
 			if err != nil {
 				t.Fatalf("Run: %v", err)
@@ -400,8 +398,8 @@ func TestRemoveDeletesTheConfig(t *testing.T) {
 	store := &stubStore{cfg: config.Config{
 		Active: "work",
 		Configs: map[string]config.Entry{
-			"work":     {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F", Registry: "registry.npmjs.org"},
-			"personal": {File: "/tmp/.npmrc", Vault: "E", Item: "P", Field: "password", Registry: "registry.npmjs.org"},
+			"work":     {File: "/tmp/.npmrc", Command: "print I", Registry: "registry.npmjs.org"},
+			"personal": {File: "/tmp/.npmrc", Command: "print P", Registry: "registry.npmjs.org"},
 		},
 	}}
 	n := agreeing()
@@ -426,7 +424,7 @@ func TestRemoveDeletesTheConfig(t *testing.T) {
 func TestRemoveTheActiveConfigClearsIt(t *testing.T) {
 	store := &stubStore{cfg: config.Config{
 		Active:  "work",
-		Configs: map[string]config.Entry{"work": {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F"}},
+		Configs: map[string]config.Entry{"work": {File: "/tmp/.npmrc", Command: "print I"}},
 	}}
 	var log strings.Builder
 	d := deps(t, &fakeSecret{}, agreeing(), store)
@@ -447,7 +445,7 @@ func TestRemoveTheActiveConfigClearsIt(t *testing.T) {
 func TestRemoveRejectsUnknownAndCombinedFlags(t *testing.T) {
 	base := config.Config{
 		Active:  "work",
-		Configs: map[string]config.Entry{"work": {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F"}},
+		Configs: map[string]config.Entry{"work": {File: "/tmp/.npmrc", Command: "print I"}},
 	}
 
 	tests := []struct {

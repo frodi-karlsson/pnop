@@ -56,7 +56,7 @@ type fakeSecret struct {
 	calls int
 }
 
-func (f *fakeSecret) Fetch(_ context.Context, _, _, _ string) (string, error) {
+func (f *fakeSecret) Fetch(_ context.Context, _ string) (string, error) {
 	f.calls++
 	return f.token, f.err
 }
@@ -154,9 +154,7 @@ func newHarness(codes []int, disk string, outcomes map[string]verify.Outcome) *h
 		verifier: &fakeVerifier{outcomes: outcomes},
 		cache:    &fakeCache{},
 		env:      map[string]string{},
-		entry: config.Entry{
-			File: "/tmp/.npmrc", Vault: "MyVault", Item: "MyItem", Field: "tokenfield",
-		}.WithDefaults(),
+		entry:    config.Entry{File: "/tmp/.npmrc", Command: "print-token"}.WithDefaults(),
 	}
 }
 

@@ -14,15 +14,15 @@ import (
 )
 
 type fakeSecret struct {
-	token string
-	err   error
-	item  string
-	calls int
+	token   string
+	err     error
+	command string
+	calls   int
 }
 
-func (f *fakeSecret) Fetch(_ context.Context, _, item, _ string) (string, error) {
+func (f *fakeSecret) Fetch(_ context.Context, command string) (string, error) {
 	f.calls++
-	f.item = item
+	f.command = command
 	return f.token, f.err
 }
 
@@ -52,7 +52,7 @@ func configured() config.Config {
 	return config.Config{
 		Active: "work",
 		Configs: map[string]config.Entry{
-			"work": {File: "/tmp/.npmrc", Vault: "V", Item: "work-item", Field: "F", Registry: "registry.npmjs.org"},
+			"work": {File: "/tmp/.npmrc", Command: "work-command", Registry: "registry.npmjs.org"},
 		},
 	}
 }
@@ -66,8 +66,8 @@ func TestRefreshesTheActiveConfig(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if sec.item != "work-item" {
-		t.Errorf("fetched item %q, want the active config's", sec.item)
+	if sec.command != "work-command" {
+		t.Errorf("ran %q, want the active config's command", sec.command)
 	}
 	if n.token != "fresh" || n.writes != 1 {
 		t.Errorf("npmrc token = %q after %d writes, want fresh after 1", n.token, n.writes)

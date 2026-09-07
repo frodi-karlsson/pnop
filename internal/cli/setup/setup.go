@@ -59,9 +59,7 @@ func Command(load func() (Deps, error)) *cobra.Command {
 
 	cmd.Flags().StringVarP(&name, "config", "c", "", "name of the config to activate (required)")
 	cmd.Flags().StringVar(&entry.File, "file", "", "npmrc file this config keeps in sync")
-	cmd.Flags().StringVar(&entry.Vault, "vault", "", "1Password vault holding the token")
-	cmd.Flags().StringVar(&entry.Item, "item", "", "1Password item holding the token")
-	cmd.Flags().StringVar(&entry.Field, "field", "", "field on the item holding the token")
+	cmd.Flags().StringVar(&entry.Command, "command", "", "command that prints the token on stdout (required)")
 	cmd.Flags().StringVar(&entry.Registry, "registry", "", "registry whose _authToken is managed")
 	cmd.Flags().BoolVar(&entry.Rerun, "rerun", false, "rerun a failed command once after refreshing its token")
 	cmd.Flags().BoolVar(&remove, "remove", false, "delete the named config instead of activating it")
@@ -106,8 +104,8 @@ func Run(ctx context.Context, d Deps, name string, flags config.Entry) error {
 	d.Log.Infof("active config is now %q", name)
 	d.Log.Infof("wrote %s", entry.File)
 	if flags != (config.Entry{}) {
-		d.Log.Infof("the item should hold a granular access token - `npm login` writes a " +
-			"short-lived session token, and an item holding one makes almost every command prompt")
+		d.Log.Infof("the command should print a granular access token - `npm login` writes a " +
+			"short-lived session token, and storing one of those makes almost every command prompt")
 	}
 	return nil
 }
@@ -153,7 +151,7 @@ func warnRegistryMismatch(d Deps, entry config.Entry) {
 // Apply fetches the entry's token, reports on it and writes the npmrc. It is
 // the half of setup that `pnop +refresh` repeats without touching the config.
 func Apply(ctx context.Context, d Deps, entry config.Entry) error {
-	token, err := d.Secret.Fetch(ctx, entry.Vault, entry.Item, entry.Field)
+	token, err := d.Secret.Fetch(ctx, entry.Command)
 	if err != nil {
 		return err
 	}
@@ -219,7 +217,7 @@ func resolveEntry(cfg config.Config, name string, flags config.Entry) (config.En
 	entry = entry.WithDefaults()
 	if err := entry.Validate(); err != nil {
 		return config.Entry{}, fmt.Errorf(
-			"%w - pnop +setup defines the whole config, so pass --vault, --item and --field together", err)
+			"%w - pnop +setup defines the whole config, so pass every flag you want kept", err)
 	}
 
 	// Store the resolved path: a "~" recorded in config would have to be

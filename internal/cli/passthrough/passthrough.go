@@ -95,7 +95,7 @@ func Run(ctx context.Context, d Deps, args []string) error {
 		return cli.Exit(code)
 	}
 
-	stored, err := d.Secret.Fetch(ctx, entry.Vault, entry.Item, entry.Field)
+	stored, err := d.Secret.Fetch(ctx, entry.Command)
 	if err != nil {
 		d.Log.Warnf("%v", err)
 		return cli.Exit(code)
@@ -109,9 +109,9 @@ func Run(ctx context.Context, d Deps, args []string) error {
 	case verify.Rejected:
 		record(d, name, disk, negcache.Rejected)
 		if fresh == disk {
-			d.Log.Warnf("the vault and %s hold the same rejected token", entry.File)
+			d.Log.Warnf("the token command and %s produce the same rejected token", entry.File)
 		} else {
-			d.Log.Warnf("the vault has a newer token and it is also rejected")
+			d.Log.Warnf("the token command produced a newer token and it is also rejected")
 		}
 		return cli.Exit(code)
 
@@ -120,7 +120,7 @@ func Run(ctx context.Context, d Deps, args []string) error {
 		// token cannot be worse.
 		if fresh == disk {
 			record(d, name, disk, negcache.Unchecked)
-			d.Log.Infof("the vault holds the same token as %s and the registry could not confirm it", entry.File)
+			d.Log.Infof("the token command produced the same token as %s and the registry could not confirm it", entry.File)
 			return cli.Exit(code)
 		}
 		return refresh(ctx, d, entry, fresh, args, code, bin, false)

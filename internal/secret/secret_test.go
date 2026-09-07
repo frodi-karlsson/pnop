@@ -2,28 +2,14 @@ package secret_test
 
 import (
 	"bytes"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/frodi-karlsson/pnop/internal/secret"
 )
 
-// stubOP writes a fake `op` executable and returns its path.
-func stubOP(t *testing.T, script string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "op")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script+"\n"), 0o700); err != nil {
-		t.Fatalf("write stub: %v", err)
-	}
-	return path
-}
-
-func TestFetchReturnsTheTrimmedField(t *testing.T) {
-	op := secret.OP{Bin: stubOP(t, `echo "npm_abc123"`)}
-
-	got, err := op.Fetch(t.Context(), "MyVault", "item", "tokenfield")
+func TestFetchReturnsTheTrimmedOutput(t *testing.T) {
+	got, err := secret.Shell{}.Fetch(t.Context(), `echo "  npm_abc123  "`)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -32,58 +18,67 @@ func TestFetchReturnsTheTrimmedField(t *testing.T) {
 	}
 }
 
-func TestFetchPassesTheItemCoordinates(t *testing.T) {
-	// Echo the args back so the test can assert how op was invoked.
-	op := secret.OP{Bin: stubOP(t, `echo "$@"`)}
-
-	got, err := op.Fetch(t.Context(), "My Vault", "My Item", "otherfield")
+// The command comes from a human, so it has to behave the way it does when
+// typed: quoting, pipes and secret references included.
+func TestFetchRunsThroughAShell(t *testing.T) {
+	got, err := secret.Shell{}.Fetch(t.Context(), `printf '%s\n' "op://Vault/item/field" | tr '/' '-'`)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
-
-	for _, want := range []string{"item get", "My Item", "--vault My Vault", "--fields label=otherfield", "--reveal"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("invocation %q is missing %q", got, want)
-		}
+	if got != "op:--Vault-item-field" {
+		t.Errorf("token = %q, want the piped result", got)
 	}
 }
 
-func TestFetchRejectsAnEmptyField(t *testing.T) {
-	op := secret.OP{Bin: stubOP(t, `echo ""`)}
-
-	if _, err := op.Fetch(t.Context(), "MyVault", "item", "tokenfield"); err == nil {
-		t.Error("Fetch succeeded on an empty field, want an error")
-	}
-}
-
-func TestFetchSurfacesOPFailure(t *testing.T) {
+// stderr belongs to the terminal so a command can explain itself, or prompt.
+func TestFetchLetsTheCommandWriteToStderr(t *testing.T) {
 	var stderr bytes.Buffer
-	op := secret.OP{
-		Bin:    stubOP(t, `echo "not signed in" >&2; exit 1`),
-		Stderr: &stderr,
-	}
 
-	_, err := op.Fetch(t.Context(), "MyVault", "item", "tokenfield")
-	if err == nil {
-		t.Fatal("Fetch succeeded, want an error")
+	_, err := secret.Shell{Stderr: &stderr}.Fetch(t.Context(), `echo "enter your password" >&2; echo tok`)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
 	}
-	// The item and vault help the user see which reference failed.
-	if !strings.Contains(err.Error(), "item") {
-		t.Errorf("err = %v, want it to name the item", err)
-	}
-	if !strings.Contains(stderr.String(), "not signed in") {
-		t.Errorf("stderr = %q, want op's own diagnostics passed through", stderr.String())
+	if !strings.Contains(stderr.String(), "enter your password") {
+		t.Errorf("stderr = %q, want the command's own output", stderr.String())
 	}
 }
 
-func TestFetchReportsAMissingOPBinary(t *testing.T) {
-	op := secret.OP{Bin: "pnop-definitely-not-a-real-op"}
+func TestFetchReportsAMissingProgram(t *testing.T) {
+	_, err := secret.Shell{}.Fetch(t.Context(), "definitely-not-a-real-binary read something")
 
-	_, err := op.Fetch(t.Context(), "MyVault", "item", "tokenfield")
 	if err == nil {
 		t.Fatal("Fetch succeeded, want an error")
 	}
-	if !strings.Contains(err.Error(), "1Password CLI not found") {
-		t.Errorf("err = %v, want a clear 'not found' message", err)
+	if !strings.Contains(err.Error(), "definitely-not-a-real-binary") || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("err = %v, want it to name the missing program", err)
+	}
+}
+
+func TestFetchReportsAFailingCommand(t *testing.T) {
+	_, err := secret.Shell{}.Fetch(t.Context(), `echo "not signed in" >&2; exit 1`)
+
+	if err == nil {
+		t.Fatal("Fetch succeeded, want an error")
+	}
+	if !strings.Contains(err.Error(), "token command failed") {
+		t.Errorf("err = %v, want it to report the failure", err)
+	}
+}
+
+// An empty token would be written to the npmrc as an empty token, which reads
+// as "no credential" and fails later, further from the cause.
+func TestFetchRejectsEmptyOutput(t *testing.T) {
+	_, err := secret.Shell{}.Fetch(t.Context(), "true")
+
+	if err == nil || !strings.Contains(err.Error(), "printed nothing") {
+		t.Fatalf("err = %v, want it to say the command printed nothing", err)
+	}
+}
+
+func TestFetchRejectsAnEmptyCommand(t *testing.T) {
+	_, err := secret.Shell{}.Fetch(t.Context(), "   ")
+
+	if err == nil || !strings.Contains(err.Error(), "no token command configured") {
+		t.Fatalf("err = %v, want it to name the missing configuration", err)
 	}
 }

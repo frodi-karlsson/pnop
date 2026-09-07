@@ -117,7 +117,7 @@ func passthroughDeps() passthrough.Deps {
 	log := logger.New(os.Stderr)
 	return passthrough.Deps{
 		LoadEntry: loadActiveEntry,
-		Secret:    secret.OP{Stdin: os.Stdin, Stderr: os.Stderr},
+		Secret:    secret.Shell{Stdin: os.Stdin, Stderr: os.Stderr},
 		Npmrc:     npmrc.FileStore{},
 		Runner:    execRunner(),
 		Verifier:  verify.HTTP{Log: log},
@@ -163,7 +163,7 @@ func setupDeps() (setup.Deps, error) {
 	log := logger.New(os.Stderr)
 	return setup.Deps{
 		ConfigPath: path,
-		Secret:     secret.OP{Stdin: os.Stdin, Stderr: os.Stderr},
+		Secret:     secret.Shell{Stdin: os.Stdin, Stderr: os.Stderr},
 		Npmrc:      npmrc.FileStore{},
 		Identifier: verify.HTTP{Log: log},
 		LoadConfig: config.Load,

@@ -1,6 +1,6 @@
 # pnop
 
-`pnop` forwards every command to `pnpm`. When a command fails, it asks the registry whether your npm token is still accepted, and refreshes it from 1Password when it is not.
+`pnop` forwards every command to `pnpm`. When a command fails, it asks the registry whether your npm token is still accepted, and when it is not, refreshes it by running a command you configured.
 
 ## Install
 
@@ -8,7 +8,7 @@
 brew install --cask frodi-karlsson/tap/pnop
 ```
 
-The cask depends on `1password-cli`, so brew installs that too. For biometric unlock rather than a password prompt, turn on "Integrate with 1Password CLI" in the desktop app.
+The cask depends on `1password-cli`, since that is what most setups will run, and it is what the examples below use. For biometric unlock rather than a password prompt, turn on "Integrate with 1Password CLI" in the desktop app. Any other command works too, so the dependency is convenience rather than requirement.
 
 The cask ships the `pnop` binary. Routing `pnpm` through it is up to you. A shell alias covers what you type:
 
@@ -25,13 +25,15 @@ PNOP_PNPM=/opt/homebrew/bin/pnpm exec pnop "$@"
 
 ## Setup
 
-Point pnop at the 1Password item that holds your npm token:
+Give pnop a command that prints your npm token on stdout:
 
 ```sh
-pnop +setup -c work --vault=MyVault --item="My item" --field=MyField
+pnop +setup -c work --command 'op read "op://Employee/npm/token"'
 ```
 
-`--field` names the key on the item that holds the token, because pnop assumes nothing about how your vault is arranged. That key's value can be either the bare token or a whole `//registry.npmjs.org/:_authToken=<token>` line.
+Any command works, so pnop needs to know nothing about how your vault is arranged. `pass-cli item view "pass://<share-id>/<item-id>/Password"`, `security find-generic-password -s npm -w`, `vault kv get -field=token secret/npm` and a script of your own are all fine. The output can be either the bare token or a whole `//registry.npmjs.org/:_authToken=<token>` line.
+
+The command runs through `sh`, with its stdin and stderr wired to your terminal so it can prompt for a biometric unlock. That also means your config file is executed: it is yours and mode 0600, the same trust as a shell rc, but it is code rather than data.
 
 Setup probes what it fetched and reports who it belongs to:
 
@@ -45,7 +47,7 @@ Passing any flag replaces a config of the same name outright, so a field you lea
 
 `--file` defaults to `~/.npmrc`, which is what pnpm reads. Pass it only if your token lives elsewhere. Setup is needed for recovery alone, so pnop works as a plain pnpm alias before you configure anything.
 
-To rewrite the npmrc from 1Password on demand, without waiting for a command to fail:
+To rerun the command and rewrite the npmrc on demand, without waiting for something to fail:
 
 ```sh
 pnop +refresh
@@ -58,7 +60,7 @@ pnop's own commands carry a `+`: `+setup`, `+refresh`, `+version`, `+help`. Ever
 Define a second config, then switch with `-c` alone:
 
 ```sh
-pnop +setup -c personal --vault=MyOtherVault --item="My other item" --field=MyField
+pnop +setup -c personal --command 'pass-cli item view "pass://<share-id>/<item-id>/Password"'
 pnop +setup -c work
 ```
 
@@ -66,18 +68,18 @@ Each switch rewrites the npmrc with that config's token. Drop one you no longer 
 
 ## How it works
 
-Every command goes straight to pnpm. If it succeeds, pnop does nothing at all: no config read, no registry contacted, no vault touched.
+Every command goes straight to pnpm. If it succeeds, pnop does nothing at all: no config read, no registry contacted, no command run.
 
 If it fails, pnop asks `GET <registry>/-/whoami` with the token from your npmrc. That is a question about the credential, answered by the registry, rather than an inference from what pnpm printed, which changed with every pnpm major while the fix stayed the same.
 
 | whoami answers | What pnop does |
 | - | - |
 | 200 | Nothing. The token works, so the failure is something else. |
-| 401 | Reads 1Password, and writes the token if the vault holds a live one. |
+| 401 | Runs your token command, and writes what it prints if the registry accepts it. |
 | 403, 404, 405, 5xx | Nothing. That describes the endpoint, not your token. |
 | nothing at all | Nothing. Being offline is not evidence about a credential. |
 
-With no token in the npmrc, pnop skips the probe and reads 1Password directly, since an unauthenticated whoami answers 401 about a credential that does not exist.
+With no token in the npmrc, pnop skips the probe and runs the command directly, since an unauthenticated whoami answers 401 about a credential that does not exist.
 
 A refresh does not rerun your command. pnop cannot see whether the first attempt got far enough to have a side effect, so it writes the token and hands the command back:
 
@@ -90,8 +92,8 @@ A refresh does not rerun your command. pnop cannot see whether the first attempt
 
 - **No rerun by default.** Opt in with `--rerun` at setup, `rerun = true` in the config, or `PNOP_RERUN=1` once. The rerun carries `PNOP_RETRIED=1` in its own environment, so one refresh is the budget even when a pnpm script calls pnpm.
 - **A valid but too narrow token is not recovered.** If the package you asked for is outside its grants, whoami answers 200 while pnpm answers 404: identity and authorization are different questions. Run `pnop +setup -c <name>` to refetch.
-- **Only the registry your config names is probed.** A config holds one registry and one vault field, so a 401 from another host could only be answered with a credential that does not belong to it. Use one config per registry.
-- **Repeated failures do not repeat the prompt.** When a vault read cannot help, pnop remembers that for ten minutes under `~/Library/Caches/pnop` and says so instead of prompting again.
+- **Only the registry your config names is probed.** A config holds one registry and one token command, so a 401 from another host could only be answered with a credential that does not belong to it. Use one config per registry.
+- **Repeated failures do not repeat the prompt.** When running the command cannot help, pnop remembers that for ten minutes under `~/Library/Caches/pnop` and says so instead of prompting again.
 - **`pnpm -r` reports pnpm's own exit code**, not the script's, with or without `--no-bail`.
 - **pnpm caches registry metadata for 24 hours**, per package and registry, by the cache file's mtime. Inside that window `install` and `up` make no registry request, so a dead token cannot fail a command and pnop has nothing to react to. This is the usual reason for "pnop didn't fire".
 
