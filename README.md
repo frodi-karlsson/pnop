@@ -8,6 +8,8 @@
 brew install --cask frodi-karlsson/tap/pnop
 ```
 
+The cask depends on `1password-cli`, so brew installs that too; for biometric unlock rather than a password prompt, turn on "Integrate with 1Password CLI" in the desktop app.
+
 The cask ships the `pnop` binary; routing `pnpm` through it is up to you. A shell alias covers what you type:
 
 ```sh
