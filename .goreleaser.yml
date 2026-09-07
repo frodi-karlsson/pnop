@@ -52,10 +52,6 @@ homebrew_casks:
     commit_author:
       name: goreleaserbot
       email: goreleaser@carlosbecker.com
-    # pnop reads every token through the 1Password CLI, so an install without
-    # it can do nothing but forward to pnpm.
-    dependencies:
-      - cask: 1password-cli
     homepage: "https://github.com/frodi-karlsson/pnop"
     description: "pnpm with automatic npm token recovery from 1Password"
     license: "MIT"
