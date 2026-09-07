@@ -39,7 +39,7 @@ Setup probes what it fetched and reports who it belongs to:
 
 Right now is the only claim. Every npm token expires: granular tokens carry a mandatory expiry, and `npm login` writes a session token that dies within the day, so an item holding one of those makes almost every command prompt. Setup also warns when the npmrc it manages names a different registry than the config does.
 
-Any flag defines the config outright: what you pass is the whole entry, and what you leave out goes back to its default rather than to whatever was there before. That is how an optional field is cleared, and it means a half-typed command fails instead of silently inheriting the rest of an old config. With no flags at all, `+setup -c <name>` is a pure profile switch.
+Passing any flag replaces a config of the same name outright, so a field you leave out returns to its default rather than to what was there before.
 
 `--file` defaults to `~/.npmrc`, which is what pnpm reads. Pass it only if your token lives elsewhere. Setup is needed for recovery alone, so pnop works as a plain pnpm alias before you configure anything.
 

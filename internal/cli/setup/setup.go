@@ -37,11 +37,10 @@ func Command(load func() (Deps, error)) *cobra.Command {
 		Use:   "+setup -c <name>",
 		Short: "Switch to a credential config, creating it if flags are given",
 		Long: "Activate a named credential config and write its token to the npmrc it\n" +
-			"manages. With no flags it is a pure profile switch.\n\n" +
-			"Any flag defines the config outright: what you pass is the whole entry,\n" +
-			"and what you leave out goes back to its default rather than to whatever\n" +
-			"was there before. That is how an optional field is cleared. With --remove\n" +
-			"the config is deleted instead, leaving the npmrc alone.\n\n" +
+			"manages. With no flags it is a pure profile switch; passing any flag\n" +
+			"replaces a config of the same name outright, so a field you leave out\n" +
+			"returns to its default. With --remove the config is deleted instead,\n" +
+			"leaving the npmrc alone.\n\n" +
 			"The `+` is what separates pnop's commands from pnpm's, which has a\n" +
 			"`setup` of its own.",
 		Args:         cobra.NoArgs,
