@@ -6,16 +6,14 @@ import (
 	"testing"
 )
 
-// `setup` is pnop's own; everything else - including `help` - must fall
-// through to pnpm rather than being intercepted here.
-func TestReservedWordsRouteToPnop(t *testing.T) {
+// Bare pnop has nothing to forward, so it introduces itself. `-h` and
+// `--help` are pnpm's, and reach it.
+func TestBareInvocationPrintsPnopHelp(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
 	}{
 		{"bare", nil},
-		{"-h", []string{"-h"}},
-		{"--help", []string{"--help"}},
 	}
 
 	for _, tt := range tests {
@@ -43,23 +41,27 @@ func TestReservedWordsRouteToPnop(t *testing.T) {
 	}
 }
 
-func TestSetupIsRegisteredAsASubcommand(t *testing.T) {
+// Only the `+` forms are pnop's.
+func TestSigilCommandsAreRegistered(t *testing.T) {
 	root := newRoot()
 
-	cmd, _, err := root.Find([]string{"setup"})
-	if err != nil {
-		t.Fatalf("Find: %v", err)
-	}
-	if cmd.Name() != "setup" {
-		t.Errorf("resolved %q, want setup", cmd.Name())
+	for _, name := range []string{"+setup", "+refresh", "+version", "+help"} {
+		cmd, _, err := root.Find([]string{name})
+		if err != nil {
+			t.Fatalf("Find(%q): %v", name, err)
+		}
+		if cmd.Name() != name {
+			t.Errorf("resolved %q, want %q", cmd.Name(), name)
+		}
 	}
 }
 
-// `pnop help` and pnpm subcommands must NOT resolve to a pnop subcommand.
+// Everything without the sigil is pnpm's, `setup` and `refresh` included:
+// pnpm has a `setup` of its own, and a repo may have a `refresh` script.
 func TestPnpmCommandsAreNotIntercepted(t *testing.T) {
 	root := newRoot()
 
-	for _, arg := range []string{"help", "install", "up", "run", "publish"} {
+	for _, arg := range []string{"help", "install", "up", "run", "publish", "setup", "refresh", "--version", "-v", "--help", "-h"} {
 		cmd, _, err := root.Find([]string{arg})
 		if err != nil {
 			t.Fatalf("Find(%q): %v", arg, err)

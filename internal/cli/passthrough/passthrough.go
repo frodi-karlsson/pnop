@@ -34,7 +34,7 @@ const (
 
 // Deps are the collaborators Run needs, injected for testing. LoadEntry is
 // called only after a command has failed, so pnop works as a plain pnpm alias
-// before `pnop setup` has ever been run.
+// before `pnop +setup` has ever been run.
 type Deps struct {
 	LoadEntry   func() (string, config.Entry, error)
 	Secret      secret.Fetcher

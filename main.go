@@ -11,6 +11,7 @@ import (
 
 	"github.com/frodi-karlsson/pnop/internal/cli"
 	"github.com/frodi-karlsson/pnop/internal/cli/passthrough"
+	"github.com/frodi-karlsson/pnop/internal/cli/refresh"
 	"github.com/frodi-karlsson/pnop/internal/cli/setup"
 	"github.com/frodi-karlsson/pnop/internal/config"
 	"github.com/frodi-karlsson/pnop/internal/logger"
@@ -35,29 +36,22 @@ func newRoot() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "pnop [pnpm args...]",
 		Short: "pnpm, with automatic npm token recovery",
-		Long: "pnop forwards every command to pnpm. If a command fails, it compares the\n" +
-			"npm token in your active config's npmrc against 1Password; when the token\n" +
-			"is stale it refreshes the file and reruns the command, and when it is\n" +
-			"already current it leaves the original failure alone.\n\n" +
-			"Only `setup`, `--version` and `--help` are pnop's own. Everything else,\n" +
-			"including `help`, reaches pnpm untouched.",
+		Long: "pnop forwards every command to pnpm. If a command fails, it asks the\n" +
+			"registry whether your npm token is still accepted, and refreshes it from\n" +
+			"1Password when it is not.\n\n" +
+			"pnop's own commands carry a `+`: +setup, +refresh, +version, +help.\n" +
+			"Anything without it is pnpm's, including `setup`, `help` and `--version`,\n" +
+			"which pnpm defines itself.",
 		Args:               cobra.ArbitraryArgs,
 		DisableFlagParsing: true,
 		SilenceUsage:       true,
 		// Errors are reported once, by exitCode, so cobra must not also print them.
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Bare `pnop` prints help rather than assuming a subcommand.
+			// Bare `pnop` has nothing to forward, so it introduces itself.
 			if len(args) == 0 {
 				return cmd.Help()
 			}
-			switch args[0] {
-			case "-h", "--help":
-				return cmd.Help()
-			case "-v", "--version":
-				return printVersions(cmd.Context(), cmd.OutOrStdout())
-			}
-
 			return passthrough.Run(cmd.Context(), passthroughDeps(), args)
 		},
 	}
@@ -66,7 +60,36 @@ func newRoot() *cobra.Command {
 	root.SetHelpCommand(&cobra.Command{Hidden: true, Use: "no-op-help"})
 
 	root.AddCommand(setup.Command(setupDeps))
+	root.AddCommand(refresh.Command(setupDeps))
+	root.AddCommand(versionCommand())
+	root.AddCommand(helpCommand(root))
 	return root
+}
+
+// versionCommand reports pnop's version. `--version` belongs to pnpm.
+func versionCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:          "+version",
+		Short:        "Print pnop's version and the pnpm it drives",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return printVersions(cmd.Context(), cmd.OutOrStdout())
+		},
+	}
+}
+
+// helpCommand exists because `help` and `--help` reach pnpm now.
+func helpCommand(root *cobra.Command) *cobra.Command {
+	return &cobra.Command{
+		Use:          "+help",
+		Short:        "Show pnop's own help",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return root.Help()
+		},
+	}
 }
 
 // printVersions reports pnop's own version and the pnpm it will drive.

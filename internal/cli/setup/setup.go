@@ -26,23 +26,30 @@ type Deps struct {
 	Log logger.Logger
 }
 
-// Command returns the `pnop setup` subcommand.
+// Command returns the `pnop +setup` subcommand.
 func Command(load func() (Deps, error)) *cobra.Command {
 	var name string
+	var remove bool
 	entry := config.Entry{}
 
 	cmd := &cobra.Command{
-		Use:   "setup -c <name>",
+		Use:   "+setup -c <name>",
 		Short: "Switch to a credential config, creating it if flags are given",
 		Long: "Activate a named credential config and write its token to the npmrc it\n" +
 			"manages. With --vault/--item/--field the config is created or updated\n" +
-			"first. Later pnop commands need no flags.",
+			"first. Later pnop commands need no flags. With --remove the config is\n" +
+			"deleted instead, leaving the npmrc alone.\n\n" +
+			"The `+` is what separates pnop's commands from pnpm's, which has a\n" +
+			"`setup` of its own.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			deps, err := load()
 			if err != nil {
 				return err
+			}
+			if remove {
+				return Remove(deps, name, entry)
 			}
 			return Run(cmd.Context(), deps, name, entry)
 		},
@@ -54,6 +61,7 @@ func Command(load func() (Deps, error)) *cobra.Command {
 	cmd.Flags().StringVar(&entry.Item, "item", "", "1Password item holding the token")
 	cmd.Flags().StringVar(&entry.Field, "field", "", "field on the item holding the token")
 	cmd.Flags().StringVar(&entry.Registry, "registry", "", "registry whose _authToken is managed")
+	cmd.Flags().BoolVar(&remove, "remove", false, "delete the named config instead of activating it")
 
 	return cmd
 }
@@ -66,7 +74,7 @@ func Command(load func() (Deps, error)) *cobra.Command {
 // saved, so a vault reference that cannot be read is never recorded as active.
 func Run(ctx context.Context, d Deps, name string, flags config.Entry) error {
 	if name == "" {
-		return errors.New("a config name is required: pnop setup -c <name>")
+		return errors.New("a config name is required: pnop +setup -c <name>")
 	}
 
 	cfg, err := d.LoadConfig(d.ConfigPath)
@@ -82,17 +90,9 @@ func Run(ctx context.Context, d Deps, name string, flags config.Entry) error {
 		return err
 	}
 
-	token, err := d.Secret.Fetch(ctx, entry.Vault, entry.Item, entry.Field)
-	if err != nil {
+	if err := Apply(ctx, d, entry); err != nil {
 		return err
 	}
-
-	report(ctx, d, entry, npmrc.NormalizeToken(token))
-
-	if err := d.Npmrc.WriteToken(entry.File, entry.Registry, token); err != nil {
-		return err
-	}
-	warnRegistryMismatch(d, entry)
 
 	cfg.Configs[name] = entry
 	cfg.Active = name
@@ -145,6 +145,57 @@ func warnRegistryMismatch(d Deps, entry config.Entry) {
 	}
 	d.Log.Warnf("%s sets registry=%s, but this config manages %s - pnop will check and refresh "+
 		"the token for %s only", entry.File, named, entry.Registry, entry.Registry)
+}
+
+// Apply fetches the entry's token, reports on it and writes the npmrc. It is
+// the half of setup that `pnop +refresh` repeats without touching the config.
+func Apply(ctx context.Context, d Deps, entry config.Entry) error {
+	token, err := d.Secret.Fetch(ctx, entry.Vault, entry.Item, entry.Field)
+	if err != nil {
+		return err
+	}
+
+	report(ctx, d, entry, npmrc.NormalizeToken(token))
+
+	if err := d.Npmrc.WriteToken(entry.File, entry.Registry, token); err != nil {
+		return err
+	}
+	warnRegistryMismatch(d, entry)
+	return nil
+}
+
+// Remove deletes the named config. The npmrc is left alone: dropping a profile
+// says nothing about whether the credential on disk is still wanted.
+func Remove(d Deps, name string, flags config.Entry) error {
+	if name == "" {
+		return errors.New("a config name is required: pnop +setup -c <name> --remove")
+	}
+	if flags != (config.Entry{}) {
+		return errors.New("--remove takes no other flags")
+	}
+
+	cfg, err := d.LoadConfig(d.ConfigPath)
+	if err != nil {
+		return err
+	}
+	if _, err := cfg.Entry(name); err != nil {
+		return err
+	}
+
+	delete(cfg.Configs, name)
+	wasActive := cfg.Active == name
+	if wasActive {
+		cfg.Active = ""
+	}
+	if err := d.SaveConfig(d.ConfigPath, cfg); err != nil {
+		return err
+	}
+
+	d.Log.Infof("removed config %q", name)
+	if wasActive {
+		d.Log.Warnf("no config is active now - run: pnop +setup -c <name>")
+	}
+	return nil
 }
 
 // resolveEntry merges any supplied flags over the stored entry, or builds a

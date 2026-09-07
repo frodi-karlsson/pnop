@@ -36,9 +36,9 @@ type Entry struct {
 	Rerun bool `toml:"rerun"`
 }
 
-// ErrNotConfigured is returned by Load when `pnop setup` has never been run.
+// ErrNotConfigured is returned by Load when `pnop +setup` has never been run.
 var ErrNotConfigured = errors.New(
-	"pnop is not configured yet - run: pnop setup -c <name> --vault=<vault> --item=<item> --field=<field>")
+	"pnop is not configured yet - run: pnop +setup -c <name> --vault=<vault> --item=<item> --field=<field>")
 
 // Config is the whole on-disk document: a set of named entries plus a pointer
 // to the one in force.
@@ -122,7 +122,7 @@ func Save(path string, cfg Config) error {
 }
 
 // ErrNoActive is returned when the config defines entries but names none active.
-var ErrNoActive = errors.New("no active config - run: pnop setup -c <name>")
+var ErrNoActive = errors.New("no active config - run: pnop +setup -c <name>")
 
 // UnknownConfigError names a config that is referenced but not defined.
 type UnknownConfigError struct {

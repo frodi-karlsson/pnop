@@ -49,7 +49,7 @@ type Verifier interface {
 	Verify(ctx context.Context, registry, token string) Outcome
 }
 
-// Identifier also reports the username, which `pnop setup` shows.
+// Identifier also reports the username, which `pnop +setup` shows.
 type Identifier interface {
 	Verifier
 	Identify(ctx context.Context, registry, token string) (string, Outcome)

@@ -331,3 +331,82 @@ func TestWarnsWhenTheNpmrcNamesAnotherRegistry(t *testing.T) {
 		})
 	}
 }
+
+func TestRemoveDeletesTheConfig(t *testing.T) {
+	store := &stubStore{cfg: config.Config{
+		Active: "work",
+		Configs: map[string]config.Entry{
+			"work":     {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F", Registry: "registry.npmjs.org"},
+			"personal": {File: "/tmp/.npmrc", Vault: "E", Item: "P", Field: "password", Registry: "registry.npmjs.org"},
+		},
+	}}
+	n := agreeing()
+
+	if err := setup.Remove(deps(t, &fakeSecret{}, n, store), "personal", config.Entry{}); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	if _, ok := store.saved.Configs["personal"]; ok {
+		t.Error("config was still saved after removal")
+	}
+	if store.saved.Active != "work" {
+		t.Errorf("Active = %q, want work: removing another config must not deactivate it", store.saved.Active)
+	}
+	if n.writes != 0 {
+		t.Errorf("npmrc writes = %d, want 0: removing a profile says nothing about the token on disk", n.writes)
+	}
+}
+
+// Removing the active config leaves pnop with nothing to refresh, which it has
+// to say rather than fail silently on the next command.
+func TestRemoveTheActiveConfigClearsIt(t *testing.T) {
+	store := &stubStore{cfg: config.Config{
+		Active:  "work",
+		Configs: map[string]config.Entry{"work": {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F"}},
+	}}
+	var log strings.Builder
+	d := deps(t, &fakeSecret{}, agreeing(), store)
+	d.Log = logger.New(&log)
+
+	if err := setup.Remove(d, "work", config.Entry{}); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	if store.saved.Active != "" {
+		t.Errorf("Active = %q, want it cleared", store.saved.Active)
+	}
+	if !strings.Contains(log.String(), "no config is active") {
+		t.Errorf("log = %q, want it to say nothing is active", log.String())
+	}
+}
+
+func TestRemoveRejectsUnknownAndCombinedFlags(t *testing.T) {
+	base := config.Config{
+		Active:  "work",
+		Configs: map[string]config.Entry{"work": {File: "/tmp/.npmrc", Vault: "V", Item: "I", Field: "F"}},
+	}
+
+	tests := []struct {
+		name  string
+		cfg   string
+		flags config.Entry
+	}{
+		{"unknown config", "nope", config.Entry{}},
+		{"combined with other flags", "work", config.Entry{Vault: "V"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &stubStore{cfg: base}
+
+			err := setup.Remove(deps(t, &fakeSecret{}, agreeing(), store), tt.cfg, tt.flags)
+
+			if err == nil {
+				t.Fatal("Remove succeeded, want an error")
+			}
+			if store.saveN != 0 {
+				t.Errorf("saved the config %d times, want 0", store.saveN)
+			}
+		})
+	}
+}
