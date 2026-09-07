@@ -26,7 +26,7 @@ PNOP_PNPM=/opt/homebrew/bin/pnpm exec pnop "$@"
 Point pnop at the 1Password item that holds your npm token:
 
 ```sh
-pnop setup -c work --vault=MyVault --item="My item" --field=MyField
+pnop +setup -c work --vault=MyVault --item="My item" --field=MyField
 ```
 
 `--field` names the key on the item that holds the token, because pnop assumes nothing about how your vault is arranged. That key's value can be either the bare token or a whole `//registry.npmjs.org/:_authToken=<token>` line.
@@ -41,16 +41,24 @@ Right now is the only claim. Every npm token expires: granular tokens carry a ma
 
 `--file` defaults to `~/.npmrc`, which is what pnpm reads. Pass it only if your token lives elsewhere. Setup is needed for recovery alone, so pnop works as a plain pnpm alias before you configure anything.
 
+To rewrite the npmrc from 1Password on demand, without waiting for a command to fail:
+
+```sh
+pnop +refresh
+```
+
+pnop's own commands carry a `+`: `+setup`, `+refresh`, `+version`, `+help`. Everything without it is pnpm's, which matters because pnpm has a `setup` of its own, and because a repo script named `refresh` stays reachable as plain `pnpm refresh`.
+
 ### Switching between tokens
 
 Define a second config, then switch with `-c` alone:
 
 ```sh
-pnop setup -c personal --vault=MyOtherVault --item="My other item" --field=MyField
-pnop setup -c work
+pnop +setup -c personal --vault=MyOtherVault --item="My other item" --field=MyField
+pnop +setup -c work
 ```
 
-Each switch rewrites the npmrc with that config's token. Running `setup -c` against the active config refetches, which is how you force a refresh by hand.
+Each switch rewrites the npmrc with that config's token. Drop one you no longer want with `pnop +setup -c personal --remove`, which deletes the config and leaves the npmrc alone.
 
 ## How it works
 
@@ -77,7 +85,7 @@ A refresh does not rerun your command. pnop cannot see whether the first attempt
 ## Deliberate no-ops
 
 - **No rerun by default.** Opt in with `rerun = true` in the config, or `PNOP_RERUN=1` once. The rerun carries `PNOP_RETRIED=1` in its own environment, so one refresh is the budget even when a pnpm script calls pnpm.
-- **A valid but too narrow token is not recovered.** If the package you asked for is outside its grants, whoami answers 200 while pnpm answers 404: identity and authorization are different questions. Run `pnop setup -c <name>` to refetch.
+- **A valid but too narrow token is not recovered.** If the package you asked for is outside its grants, whoami answers 200 while pnpm answers 404: identity and authorization are different questions. Run `pnop +setup -c <name>` to refetch.
 - **Only the registry your config names is probed.** A config holds one registry and one vault field, so a 401 from another host could only be answered with a credential that does not belong to it. Use one config per registry.
 - **Repeated failures do not repeat the prompt.** When a vault read cannot help, pnop remembers that for ten minutes under `~/Library/Caches/pnop` and says so instead of prompting again.
 - **`pnpm -r` reports pnpm's own exit code**, not the script's, with or without `--no-bail`.
