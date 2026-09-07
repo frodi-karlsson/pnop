@@ -19,7 +19,7 @@ type Fetcher interface {
 // OP shells out to the 1Password CLI, reusing whatever session the user
 // already has (including Touch ID).
 type OP struct {
-	// Bin is the op executable; empty means "op" on PATH.
+	// Bin is the op executable. Empty means "op" on PATH.
 	Bin string
 	// Stdin and Stderr are wired to the terminal so op can prompt for
 	// biometric unlock. Only stdout is captured, since that carries the secret.

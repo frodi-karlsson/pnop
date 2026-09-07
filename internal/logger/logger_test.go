@@ -65,7 +65,7 @@ func TestMultipleLinesAccumulate(t *testing.T) {
 }
 
 func TestDiscardProducesNothing(t *testing.T) {
-	// Compiles and runs without panicking; nothing to observe by design.
+	// Compiles and runs without panicking. There is nothing to observe by design.
 	logger.Discard().Infof("ignored %d", 1)
 	logger.Discard().Warnf("ignored")
 }

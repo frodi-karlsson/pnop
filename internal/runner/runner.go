@@ -33,7 +33,7 @@ type Result struct {
 }
 
 // Runner runs a command and reports the result. A non-nil error means the
-// command could not be run at all; a failed command reports a non-zero code
+// command could not be run at all. A failed command reports a non-zero code
 // with a nil error.
 type Runner interface {
 	Run(ctx context.Context, name string, args ...string) (Result, error)

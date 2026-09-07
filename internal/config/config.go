@@ -113,8 +113,8 @@ func Save(path string, cfg Config) error {
 	if err := os.WriteFile(path, []byte(sb.String()), 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
-	// WriteFile's mode only applies on creation; re-assert it so a config that
-	// already existed with looser permissions is tightened.
+	// WriteFile's mode only applies on creation, so re-assert it and tighten a
+	// config that already existed with looser permissions.
 	if err := os.Chmod(path, 0o600); err != nil {
 		return fmt.Errorf("chmod %s: %w", path, err)
 	}

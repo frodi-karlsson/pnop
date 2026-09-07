@@ -56,7 +56,7 @@ func newRoot() *cobra.Command {
 		},
 	}
 
-	// cobra injects a `help` command by default; pnop must let `help` reach pnpm.
+	// cobra injects a `help` command by default, and pnop must let `help` reach pnpm.
 	root.SetHelpCommand(&cobra.Command{Hidden: true, Use: "no-op-help"})
 
 	root.AddCommand(setup.Command(setupDeps))

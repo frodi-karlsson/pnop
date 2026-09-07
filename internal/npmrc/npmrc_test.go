@@ -118,7 +118,7 @@ func TestWriteTokenLeavesNoTempFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadDir: %v", err)
 	}
-	// The lock file is expected to persist; removing it would race with any
+	// The lock file is expected to persist. Removing it would race with any
 	// other process waiting on it.
 	for _, e := range entries {
 		if strings.HasSuffix(e.Name(), ".tmp") {
@@ -151,7 +151,7 @@ func TestLastDuplicateEntryWins(t *testing.T) {
 	}
 }
 
-// A dotfiles-managed npmrc is commonly a symlink; replacing the link with a
+// A dotfiles-managed npmrc is commonly a symlink. Replacing the link with a
 // regular file would silently detach it from the repo.
 func TestWriteTokenFollowsSymlinks(t *testing.T) {
 	dir := t.TempDir()
@@ -216,7 +216,7 @@ func TestConcurrentWritesPreserveEveryEntry(t *testing.T) {
 }
 
 // The token in 1Password may have been pasted as a bare value or as the whole
-// npmrc line; both must produce the same result.
+// npmrc line, and both must produce the same result.
 func TestNormalizeToken(t *testing.T) {
 	tests := []struct {
 		name string
