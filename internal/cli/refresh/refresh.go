@@ -40,6 +40,8 @@ func Run(ctx context.Context, d setup.Deps) error {
 		return err
 	}
 
+	setup.WarnLegacy(d, cfg.Active, entry)
+
 	if err := setup.Apply(ctx, d, entry); err != nil {
 		return err
 	}

@@ -33,6 +33,8 @@ pnop +setup -c work --command 'op read "op://Employee/npm/token"'
 
 Any command works, so pnop needs to know nothing about how your vault is arranged. `pass-cli item view "pass://<share-id>/<item-id>/Password"`, `security find-generic-password -s npm -w`, `vault kv get -field=token secret/npm` and a script of your own are all fine. The output can be either the bare token or a whole `//registry.npmjs.org/:_authToken=<token>` line.
 
+A config written before commands existed keeps working. Its `vault`, `item` and `field` are read as the `op` invocation they used to build, pnop warns that they are deprecated and prints the `--command` line that replaces them, and the next `+setup` rewrites the file.
+
 The command runs through `sh`, with its stdin and stderr wired to your terminal so it can prompt for a biometric unlock. That also means your config file is executed: it is yours and mode 0600, the same trust as a shell rc, but it is code rather than data.
 
 Setup probes what it fetched and reports who it belongs to:

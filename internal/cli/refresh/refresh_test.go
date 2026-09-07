@@ -38,6 +38,9 @@ func (f *fakeNpmrc) WriteToken(_, _, token string) error   { f.token = token; f.
 func deps(t *testing.T, sec *fakeSecret, n *fakeNpmrc, cfg config.Config, loadErr error) (setup.Deps, *int) {
 	t.Helper()
 	saves := 0
+	for name, entry := range cfg.Configs {
+		cfg.Configs[name] = entry.WithDefaults()
+	}
 	return setup.Deps{
 		ConfigPath: filepath.Join(t.TempDir(), "config.toml"),
 		Secret:     sec,
@@ -116,5 +119,29 @@ func TestRefreshSurfacesAVaultFailure(t *testing.T) {
 	}
 	if n.writes != 0 {
 		t.Errorf("npmrc writes = %d, want 0 when nothing was fetched", n.writes)
+	}
+}
+
+// refresh never saves, so it warns every time until a +setup rewrites the file.
+func TestRefreshWarnsAboutADeprecatedConfig(t *testing.T) {
+	cfg := config.Config{
+		Active: "work",
+		Configs: map[string]config.Entry{
+			"work": {File: "/tmp/.npmrc", Vault: "RnD", Item: "NPM token", Field: "password", Registry: "registry.npmjs.org"},
+		},
+	}
+	var log strings.Builder
+	d, saves := deps(t, &fakeSecret{token: "fresh"}, &fakeNpmrc{}, cfg, nil)
+	d.Log = logger.New(&log)
+
+	if err := refresh.Run(t.Context(), d); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if !strings.Contains(log.String(), "deprecated") {
+		t.Errorf("log = %q, want a deprecation warning", log.String())
+	}
+	if *saves != 0 {
+		t.Errorf("saved the config %d times, want 0", *saves)
 	}
 }

@@ -472,3 +472,48 @@ func TestRemoveRejectsUnknownAndCombinedFlags(t *testing.T) {
 		})
 	}
 }
+
+// An old config keeps working, and says so once, with the line that replaces it.
+func TestWarnsAboutADeprecatedConfig(t *testing.T) {
+	store := &stubStore{cfg: config.Config{
+		Active: "job",
+		Configs: map[string]config.Entry{
+			"job": {File: "/tmp/.npmrc", Vault: "RnD", Item: "NPM token", Field: "password"},
+		},
+	}}
+	var log strings.Builder
+	d := deps(t, &fakeSecret{token: "tok"}, agreeing(), store)
+	d.Log = logger.New(&log)
+
+	if err := setup.Run(t.Context(), d, "job", config.Entry{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if !strings.Contains(log.String(), "deprecated") {
+		t.Errorf("log = %q, want a deprecation warning", log.String())
+	}
+	if !strings.Contains(log.String(), "--command") {
+		t.Errorf("log = %q, want the replacement command line", log.String())
+	}
+	if store.saved.Configs["job"].Command == "" {
+		t.Error("the migrated command was not saved")
+	}
+}
+
+func TestSaysNothingAboutACurrentConfig(t *testing.T) {
+	store := &stubStore{cfg: config.Config{
+		Active:  "job",
+		Configs: map[string]config.Entry{"job": {File: "/tmp/.npmrc", Command: "print token"}},
+	}}
+	var log strings.Builder
+	d := deps(t, &fakeSecret{token: "tok"}, agreeing(), store)
+	d.Log = logger.New(&log)
+
+	if err := setup.Run(t.Context(), d, "job", config.Entry{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if strings.Contains(log.String(), "deprecated") {
+		t.Errorf("log = %q, want no deprecation warning", log.String())
+	}
+}

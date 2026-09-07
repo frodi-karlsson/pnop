@@ -91,6 +91,8 @@ func Run(ctx context.Context, d Deps, name string, flags config.Entry) error {
 		return err
 	}
 
+	WarnLegacy(d, name, entry)
+
 	if err := Apply(ctx, d, entry); err != nil {
 		return err
 	}
@@ -146,6 +148,17 @@ func warnRegistryMismatch(d Deps, entry config.Entry) {
 	}
 	d.Log.Warnf("%s sets registry=%s, but this config manages %s - pnop will check and refresh "+
 		"the token for %s only", entry.File, named, entry.Registry, entry.Registry)
+}
+
+// WarnLegacy reports a config still written in 1Password coordinates, and
+// gives the command that replaces them. pnop keeps running it either way, so
+// this is a nudge rather than a failure.
+func WarnLegacy(d Deps, name string, entry config.Entry) {
+	if !entry.Legacy() {
+		return
+	}
+	d.Log.Warnf("config %q still stores vault/item/field, which are deprecated. Update it with: "+
+		"pnop +setup -c %s --command %q", name, name, entry.Command)
 }
 
 // Apply fetches the entry's token, reports on it and writes the npmrc. It is

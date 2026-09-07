@@ -140,8 +140,10 @@ func TestWithDefaultsMigratesTheOldCoordinates(t *testing.T) {
 	if got.Command != want {
 		t.Errorf("Command = %q, want %q", got.Command, want)
 	}
-	if got.Vault != "" || got.Item != "" || got.Field != "" {
-		t.Errorf("kept vault=%q item=%q field=%q, want them dropped", got.Vault, got.Item, got.Field)
+	// The coordinates outlive the load so a caller can say the config is due
+	// an update. Save is what drops them.
+	if !got.Legacy() {
+		t.Error("the entry stopped reporting itself as legacy, so nothing can warn about it")
 	}
 	if err := got.Validate(); err != nil {
 		t.Errorf("Validate: %v, want a migrated entry to be usable", err)
@@ -324,5 +326,41 @@ func TestActiveEntryNamingAMissingConfig(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("err %q does not mention %q", err, want)
 		}
+	}
+}
+
+// Save is where a migrated entry loses its old coordinates.
+func TestSaveDropsTheOldCoordinates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	cfg := config.Config{
+		Active: "job",
+		Configs: map[string]config.Entry{
+			"job": {File: "/tmp/.npmrc", Vault: "MyVault", Item: "tok", Field: "password"},
+		},
+	}
+
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	for _, key := range []string{"vault =", "item =", "field ="} {
+		if strings.Contains(string(written), key) {
+			t.Errorf("saved config still contains %q:\n%s", key, written)
+		}
+	}
+	if !strings.Contains(string(written), "command =") {
+		t.Errorf("saved config has no command:\n%s", written)
+	}
+
+	reloaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if reloaded.Configs["job"].Legacy() {
+		t.Error("a saved config still reports itself as legacy")
 	}
 }

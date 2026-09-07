@@ -33,8 +33,9 @@ type Entry struct {
 	// pnop needs to know nothing about how a vault is arranged.
 	Command string `toml:"command"`
 	// Vault, Item and Field are the 1Password coordinates pnop used before it
-	// took a command. They are read so an old config still works, rewritten as
-	// a Command on the next save, and never written back.
+	// took a command. They are read so an old config still works, and dropped
+	// by Save once the entry has been rewritten as a Command. They outlive the
+	// load so a caller can say the config is due an update.
 	Vault string `toml:"vault,omitempty"`
 	Item  string `toml:"item,omitempty"`
 	Field string `toml:"field,omitempty"`
@@ -109,9 +110,14 @@ func Load(path string) (Config, error) {
 // Save writes cfg to path, creating parent directories as needed.
 func Save(path string, cfg Config) error {
 	for name, entry := range cfg.Configs {
-		if err := entry.WithDefaults().Validate(); err != nil {
+		entry = entry.WithDefaults()
+		if err := entry.Validate(); err != nil {
 			return fmt.Errorf("config %q: %w", name, err)
 		}
+		// Saving is where a migrated entry loses its old coordinates: they
+		// have served their purpose once Command carries them.
+		entry.Vault, entry.Item, entry.Field = "", "", ""
+		cfg.Configs[name] = entry
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
@@ -177,6 +183,12 @@ func (c Config) Names() []string {
 	return names
 }
 
+// Legacy reports whether the entry still carries the 1Password coordinates
+// that pnop took before it took a command.
+func (e Entry) Legacy() bool {
+	return e.Vault != "" || e.Item != "" || e.Field != ""
+}
+
 // Validate reports whether the entry has everything needed to fetch a token.
 func (e Entry) Validate() error {
 	switch {
@@ -193,10 +205,9 @@ func (e Entry) Validate() error {
 // itself has no default: it describes where the user keeps a token, which pnop
 // makes no assumptions about.
 func (e Entry) WithDefaults() Entry {
-	if e.Command == "" && e.Vault != "" && e.Item != "" && e.Field != "" {
+	if e.Command == "" && e.Legacy() {
 		e.Command = LegacyCommand(e.Vault, e.Item, e.Field)
 	}
-	e.Vault, e.Item, e.Field = "", "", ""
 
 	if e.File == "" {
 		e.File = DefaultFile
